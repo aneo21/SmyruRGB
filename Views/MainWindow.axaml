@@ -1,0 +1,94 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="SmyruRGB.MainWindow"
+        Width="720" Height="560"
+        Title="SmyruRGB">
+
+    <Grid RowDefinitions="Auto,*" Margin="20">
+        <Border Padding="0,0,0,16">
+            <StackPanel Spacing="6">
+                <TextBlock FontSize="28" FontWeight="Bold" Text="SmyruRGB" />
+                <TextBlock Opacity="0.75" Text="Control panel for effects, devices, and controllers." />
+            </StackPanel>
+        </Border>
+
+        <TabControl Grid.Row="1">
+            <TabItem Header="Effects">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" Spacing="14">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Color settings" />
+                        <TextBlock Opacity="0.75" Text="Choose a color and send it to all controller channels." />
+
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Red" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding R}" />
+                            </Grid>
+                            <Slider Minimum="0" Maximum="255" Value="{Binding R}" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Green" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding G}" />
+                            </Grid>
+                            <Slider Minimum="0" Maximum="255" Value="{Binding G}" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Blue" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding B}" />
+                            </Grid>
+                            <Slider Minimum="0" Maximum="255" Value="{Binding B}" />
+                        </StackPanel>
+
+                        <TextBlock TextWrapping="Wrap" Text="{Binding Status}" />
+
+                        <Button HorizontalAlignment="Left"
+                                Content="Send color"
+                                Command="{Binding ApplyColorCommand}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Devices">
+                <StackPanel Margin="16" Spacing="14">
+                    <TextBlock FontSize="20" FontWeight="SemiBold" Text="LED configuration" />
+                    <TextBlock Opacity="0.75" Text="Set the number of LEDs assigned to each channel." />
+
+                    <TextBlock Text="LED count per channel" />
+                    <TextBox Width="140" Text="{Binding LedCountPerChannel}" />
+                    <TextBlock Text="{Binding MaxLedsPerChannel, StringFormat='Maximum for the detected model: {0}'}" />
+
+                    <Button HorizontalAlignment="Left"
+                            Content="Refresh devices"
+                            Command="{Binding RefreshCommand}" />
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Controllers">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" Spacing="14">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Controller information" />
+
+                        <Border Padding="14" CornerRadius="8">
+                            <StackPanel Spacing="8">
+                                <TextBlock FontWeight="SemiBold" Text="Detected device" />
+                                <TextBlock TextWrapping="Wrap" Text="{Binding DeviceSummary}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+                            <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Connection status" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Maximum LEDs per channel" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding MaxLedsPerChannel}" />
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>
