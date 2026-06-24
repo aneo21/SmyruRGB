@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SmyruRGB.Views.ControllersTabView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="14">
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Controller information" />
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Active controller" />
+                    <Grid ColumnDefinitions="Auto,260,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Controller" />
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableControllers}"
+                                  SelectedItem="{Binding SelectedController}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button Grid.Column="2"
+                                Content="Refresh"
+                                Command="{Binding RefreshCommand}" />
+                    </Grid>
+                    <TextBlock Opacity="0.75"
+                               TextWrapping="Wrap"
+                               Text="Choose which connected Nollie controller should receive commands and profiles." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="8">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Detected device" />
+                    <TextBlock TextWrapping="Wrap" Text="{Binding DeviceSummary}" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Connection details" />
+                    <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Connection status" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Channel count" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ChannelCount}" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Maximum LEDs per channel" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MaxLedsPerChannel}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

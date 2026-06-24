@@ -1,0 +1,122 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
+             x:Class="SmyruRGB.Views.EffectsTabView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="14">
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Color settings" />
+            <TextBlock Opacity="0.75" Text="Choose an effect and send it to all controller channels." />
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="Auto,220,Auto,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Effect" />
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableEffects}"
+                                  SelectedItem="{Binding SelectedEffectName}" />
+                        <Button Grid.Column="2"
+                                Content="Apply effect"
+                                Command="{Binding ApplyColorCommand}" />
+                        <Button Grid.Column="3"
+                                Content="Stop"
+                                Command="{Binding StopEffectCommand}" />
+                    </Grid>
+
+                    <TextBlock Opacity="0.75"
+                               TextWrapping="Wrap"
+                               Text="{Binding SelectedEffectDescription}" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card" IsVisible="{Binding ShowsSpeedControl}">
+                <StackPanel Spacing="8">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Playback" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Effect speed" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding EffectSpeed}" />
+                    </Grid>
+                    <Slider Minimum="1" Maximum="100" Value="{Binding EffectSpeed}" />
+                </StackPanel>
+            </Border>
+
+            <ItemsControl IsVisible="{Binding HasEffectParameters}" ItemsSource="{Binding EffectParameterGroups}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Classes="section-card" Margin="0,0,0,8">
+                            <StackPanel Spacing="10">
+                                <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding Title}" />
+                                <ItemsControl ItemsSource="{Binding Parameters}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Spacing="6" Margin="0,0,0,8">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding Label}" />
+                                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding Value}" />
+                                                </Grid>
+                                                <Slider Minimum="{Binding Minimum}"
+                                                        Maximum="{Binding Maximum}"
+                                                        Value="{Binding Value}" />
+                                                <TextBlock Opacity="0.65" TextWrapping="Wrap" Text="{Binding Description}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Border Classes="section-card" IsVisible="{Binding ShowsBaseColorControls}">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Base color" />
+
+                    <controls:ColorPicker Color="{Binding BaseColor}"
+                                          IsAlphaEnabled="False"
+                                          IsAlphaVisible="False"
+                                          IsHexInputVisible="False" />
+
+                    <Grid ColumnDefinitions="Auto,180" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Hex" />
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding BaseColorHex, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="FFFF33" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card" IsVisible="{Binding SupportsBackgroundColor}">
+                <StackPanel Spacing="10">
+                    <CheckBox VerticalAlignment="Center"
+                              IsChecked="{Binding BackgroundColorEnabled}"
+                              Content="Enable background color" />
+
+                    <StackPanel Spacing="8" IsVisible="{Binding ShowsBackgroundColorControls}">
+                        <controls:ColorPicker Color="{Binding BackgroundColor}"
+                                              IsAlphaEnabled="False"
+                                              IsAlphaVisible="False"
+                                              IsHexInputVisible="False" />
+
+                        <Grid ColumnDefinitions="Auto,180" ColumnSpacing="12">
+                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Background hex" />
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding BackgroundColorHex, UpdateSourceTrigger=PropertyChanged}"
+                                     Watermark="FFFF33" />
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="8">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Status" />
+                    <TextBlock TextWrapping="Wrap" Text="{Binding Status}" />
+                </StackPanel>
+            </Border>
+
+            <Button HorizontalAlignment="Left"
+                    Content="Apply effect"
+                    Command="{Binding ApplyColorCommand}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

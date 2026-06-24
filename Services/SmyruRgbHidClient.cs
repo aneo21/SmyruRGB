@@ -1,4 +1,5 @@
 using HidSharp;
+using SmyruRGB.Effects;
 
 namespace SmyruRGB;
 
@@ -29,16 +30,54 @@ internal sealed class SmyruRgbHidClient : IDisposable
         ? "No supported device detected"
         : $"{_profile.Name} | VID 0x{_profile.VendorId:X4} PID 0x{_profile.ProductId:X4} | {_device.DevicePath}";
 
+    public string? DeviceIdentifier => _device is null || _profile is null
+        ? null
+        : BuildDeviceIdentifier(_device, _profile);
+
+    public int ChannelCount => _profile?.ChannelCount ?? 0;
     public int MaxLedsPerChannel => _profile?.MaxLedsPerChannel ?? 126;
 
-    public bool TryConnect(out string message)
+    public IReadOnlyList<AvailableDeviceInfo> GetAvailableDevices()
+    {
+        return DeviceList.Local.GetHidDevices()
+            .Select(device =>
+            {
+                HidDeviceProfile? profile = Profiles.FirstOrDefault(candidate => candidate.Matches(device));
+                if (profile is null)
+                {
+                    return null;
+                }
+
+                return new AvailableDeviceInfo(
+                    BuildDeviceIdentifier(device, profile),
+                    BuildDeviceLabel(device, profile),
+                    $"{profile.Name} | VID 0x{profile.VendorId:X4} PID 0x{profile.ProductId:X4} | {device.DevicePath}",
+                    profile.ChannelCount,
+                    profile.MaxLedsPerChannel);
+            })
+            .Where(info => info is not null)
+            .Cast<AvailableDeviceInfo>()
+            .OrderBy(info => info.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(info => info.DeviceIdentifier, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    public bool TryConnect(string? preferredDeviceIdentifier, out string message)
     {
         Disconnect();
+
+        bool preferredDeviceWasRequested = !string.IsNullOrWhiteSpace(preferredDeviceIdentifier);
 
         foreach (HidDevice device in DeviceList.Local.GetHidDevices())
         {
             HidDeviceProfile? profile = Profiles.FirstOrDefault(candidate => candidate.Matches(device));
             if (profile is null)
+            {
+                continue;
+            }
+
+            string deviceIdentifier = BuildDeviceIdentifier(device, profile);
+            if (preferredDeviceWasRequested && !string.Equals(deviceIdentifier, preferredDeviceIdentifier, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -56,11 +95,31 @@ internal sealed class SmyruRgbHidClient : IDisposable
             return true;
         }
 
-        message = "No compatible Nollie HID device found. Check the USB cable and OS2/OS2.1 firmware.";
+        message = preferredDeviceWasRequested
+            ? "The selected controller is no longer available. Refresh the device list and choose another controller."
+            : "No compatible Nollie HID device found. Check the USB cable and OS2/OS2.1 firmware.";
         return false;
     }
 
-    public bool TrySetSolidColor(byte red, byte green, byte blue, int ledCountPerChannel, out string message)
+    public bool TrySetSolidColor(byte red, byte green, byte blue, IReadOnlyList<int> ledCountsPerChannel, out string message)
+    {
+        IReadOnlyList<LedColor> channelColors = Enumerable.Range(0, ledCountsPerChannel.Count)
+            .Select(_ => new LedColor(red, green, blue))
+            .ToArray();
+
+        return TrySetChannelColors(channelColors, ledCountsPerChannel, out message);
+    }
+
+    public bool TrySetChannelColors(IReadOnlyList<LedColor> channelColors, IReadOnlyList<int> ledCountsPerChannel, out string message)
+    {
+        IReadOnlyList<IReadOnlyList<LedColor>> channelFrames = channelColors
+            .Select((color, index) => (IReadOnlyList<LedColor>)Enumerable.Repeat(color, ledCountsPerChannel[index]).ToArray())
+            .ToArray();
+
+        return TrySetLedFrames(channelFrames, ledCountsPerChannel, out message);
+    }
+
+    public bool TrySetLedFrames(IReadOnlyList<IReadOnlyList<LedColor>> channelFrames, IReadOnlyList<int> ledCountsPerChannel, out string message)
     {
         if (_stream is null || _profile is null)
         {
@@ -68,24 +127,46 @@ internal sealed class SmyruRgbHidClient : IDisposable
             return false;
         }
 
-        if (ledCountPerChannel < 1 || ledCountPerChannel > _profile.MaxLedsPerChannel)
+        if (channelFrames.Count != _profile.ChannelCount)
         {
-            message = $"LED count must be between 1 and {_profile.MaxLedsPerChannel}.";
+            message = $"Expected {_profile.ChannelCount} channel frames, got {channelFrames.Count}.";
             return false;
+        }
+
+        if (ledCountsPerChannel.Count != _profile.ChannelCount)
+        {
+            message = $"Expected {_profile.ChannelCount} channel LED settings, got {ledCountsPerChannel.Count}.";
+            return false;
+        }
+
+        for (int channelIndex = 0; channelIndex < ledCountsPerChannel.Count; channelIndex++)
+        {
+            int ledCount = ledCountsPerChannel[channelIndex];
+            if (ledCount < 1 || ledCount > _profile.MaxLedsPerChannel)
+            {
+                message = $"Channel {channelIndex + 1} LED count must be between 1 and {_profile.MaxLedsPerChannel}.";
+                return false;
+            }
+
+            if (channelFrames[channelIndex].Count != ledCount)
+            {
+                message = $"Channel {channelIndex + 1} frame contains {channelFrames[channelIndex].Count} LEDs, expected {ledCount}.";
+                return false;
+            }
         }
 
         try
         {
             if (_profile.IsHighSpeed)
             {
-                SendHighSpeedColor(red, green, blue, ledCountPerChannel);
+                SendHighSpeedFrames(channelFrames, ledCountsPerChannel);
             }
             else
             {
-                SendFullSpeedColor(red, green, blue, ledCountPerChannel);
+                SendFullSpeedFrames(channelFrames, ledCountsPerChannel);
             }
 
-            message = $"Sent RGB({red}, {green}, {blue}) to {_profile.ChannelCount} channels with {ledCountPerChannel} LEDs each.";
+            message = $"Sent colors to {_profile.ChannelCount} channels with individual LED counts.";
             return true;
         }
         catch (Exception ex)
@@ -109,34 +190,38 @@ internal sealed class SmyruRgbHidClient : IDisposable
         _profile = null;
     }
 
-    private void SendHighSpeedColor(byte red, byte green, byte blue, int ledCountPerChannel)
+    private void SendHighSpeedFrames(IReadOnlyList<IReadOnlyList<LedColor>> channelFrames, IReadOnlyList<int> ledCountsPerChannel)
     {
         ArgumentNullException.ThrowIfNull(_profile);
         ArgumentNullException.ThrowIfNull(_stream);
 
-        IEnumerable<int> channels = (_profile.ChannelMap ?? Enumerable.Range(0, _profile.ChannelCount).ToArray())
+        var channels = (_profile.ChannelMap ?? Enumerable.Range(0, _profile.ChannelCount).ToArray())
             .Take(_profile.ChannelCount)
-            .OrderBy(channel => channel);
+            .Select((physicalChannel, logicalChannel) => new { physicalChannel, logicalChannel })
+            .OrderBy(entry => entry.physicalChannel);
 
-        foreach (int channel in channels)
+        foreach (var channel in channels)
         {
+            int ledCount = ledCountsPerChannel[channel.logicalChannel];
+            IReadOnlyList<LedColor> ledFrame = channelFrames[channel.logicalChannel];
             byte[] report = new byte[1025];
-            report[1] = (byte)channel;
+            report[1] = (byte)channel.physicalChannel;
             report[2] = 0;
-            report[3] = (byte)(ledCountPerChannel >> 8);
-            report[4] = (byte)(ledCountPerChannel & 0xFF);
+            report[3] = (byte)(ledCount >> 8);
+            report[4] = (byte)(ledCount & 0xFF);
 
-            for (int index = 0; index < ledCountPerChannel; index++)
+            for (int index = 0; index < ledCount; index++)
             {
                 int offset = 5 + (index * 3);
-                WriteColor(report, offset, red, green, blue, _profile.ColorOrder);
+                LedColor color = ledFrame[index];
+                WriteColor(report, offset, color.Red, color.Green, color.Blue, _profile.ColorOrder);
             }
 
             _stream.Write(report);
         }
     }
 
-    private void SendFullSpeedColor(byte red, byte green, byte blue, int ledCountPerChannel)
+    private void SendFullSpeedFrames(IReadOnlyList<IReadOnlyList<LedColor>> channelFrames, IReadOnlyList<int> ledCountsPerChannel)
     {
         ArgumentNullException.ThrowIfNull(_profile);
         ArgumentNullException.ThrowIfNull(_stream);
@@ -152,8 +237,10 @@ internal sealed class SmyruRgbHidClient : IDisposable
 
         for (int channel = 0; channel < _profile.ChannelCount; channel++)
         {
-            int remaining = ledCountPerChannel;
+            int remaining = ledCountsPerChannel[channel];
+            IReadOnlyList<LedColor> ledFrame = channelFrames[channel];
             int packetId = 0;
+            int ledOffset = 0;
 
             while (remaining > 0)
             {
@@ -164,11 +251,13 @@ internal sealed class SmyruRgbHidClient : IDisposable
                 for (int colorIndex = 0; colorIndex < colorsInPacket; colorIndex++)
                 {
                     int offset = 2 + (colorIndex * 3);
-                    WriteColor(report, offset, red, green, blue, _profile.ColorOrder);
+                    LedColor color = ledFrame[ledOffset + colorIndex];
+                    WriteColor(report, offset, color.Red, color.Green, color.Blue, _profile.ColorOrder);
                 }
 
                 _stream.Write(report);
                 remaining -= colorsInPacket;
+                ledOffset += colorsInPacket;
                 packetId++;
             }
         }
@@ -197,11 +286,54 @@ internal sealed class SmyruRgbHidClient : IDisposable
         }
     }
 
+    private static string BuildDeviceIdentifier(HidDevice device, HidDeviceProfile profile)
+    {
+        string? serialNumber = TryGetSerialNumber(device);
+        if (!string.IsNullOrWhiteSpace(serialNumber))
+        {
+            return $"{profile.Name}|{profile.VendorId:X4}|{profile.ProductId:X4}|SN:{serialNumber}";
+        }
+
+        return $"{profile.Name}|{profile.VendorId:X4}|{profile.ProductId:X4}|PATH:{device.DevicePath}";
+    }
+
+    private static string BuildDeviceLabel(HidDevice device, HidDeviceProfile profile)
+    {
+        string? serialNumber = TryGetSerialNumber(device);
+        if (!string.IsNullOrWhiteSpace(serialNumber))
+        {
+            return $"{profile.Name} ({serialNumber})";
+        }
+
+        string[] parts = device.DevicePath.Split('#', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string suffix = parts.LastOrDefault() ?? device.DevicePath;
+        return $"{profile.Name} ({suffix})";
+    }
+
+    private static string? TryGetSerialNumber(HidDevice device)
+    {
+        try
+        {
+            return device.GetSerialNumber();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private enum ColorOrder
     {
         RedGreenBlue,
         GreenRedBlue
     }
+
+    internal sealed record AvailableDeviceInfo(
+        string DeviceIdentifier,
+        string DisplayName,
+        string Summary,
+        int ChannelCount,
+        int MaxLedsPerChannel);
 
     private sealed record HidDeviceProfile(
         string Name,

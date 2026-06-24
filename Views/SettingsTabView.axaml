@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SmyruRGB.Views.SettingsTabView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="14">
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Application settings" />
+            <TextBlock Opacity="0.75" Text="Configure how the app behaves outside the controller and effect workflow." />
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Window behavior" />
+                    <CheckBox IsChecked="{Binding MinimizeToTrayEnabled}"
+                              Content="Minimize to system tray" />
+                    <CheckBox IsChecked="{Binding CloseToTrayEnabled}"
+                              Content="Close to system tray" />
+                    <CheckBox IsChecked="{Binding StartMinimizedEnabled}"
+                              Content="Start minimized" />
+                    <TextBlock Opacity="0.75"
+                               TextWrapping="Wrap"
+                               Text="Minimize and close can keep SmyruRGB in the tray instead of removing it from the taskbar session. Start minimized respects the tray option when it is enabled." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Startup" />
+                    <CheckBox IsChecked="{Binding StartWithWindowsEnabled}"
+                              Content="Start with Windows" />
+                    <TextBlock Opacity="0.75"
+                               TextWrapping="Wrap"
+                               Text="Creates or removes a per-user autostart entry in Windows. This option is only meaningful on Windows." />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
