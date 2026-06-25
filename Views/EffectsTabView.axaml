@@ -71,14 +71,16 @@
                 <StackPanel Spacing="10">
                     <TextBlock FontSize="16" FontWeight="SemiBold" Text="Base color" />
 
-                    <controls:ColorPicker Color="{Binding BaseColor}"
-                                          IsAlphaEnabled="False"
-                                          IsAlphaVisible="False"
-                                          IsHexInputVisible="False" />
-
-                    <Grid ColumnDefinitions="Auto,180" ColumnSpacing="12">
-                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Hex" />
-                        <TextBox Grid.Column="1"
+                    <Grid ColumnDefinitions="Auto,Auto,180"
+                          ColumnSpacing="12"
+                          RowDefinitions="Auto">
+                        <controls:ColorPicker Grid.Column="0"
+                                              Color="{Binding BaseColor}"
+                                              IsAlphaEnabled="False"
+                                              IsAlphaVisible="False"
+                                              IsHexInputVisible="False" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="Hex" />
+                        <TextBox Grid.Column="2"
                                  Text="{Binding BaseColorHex, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="FFFF33" />
                     </Grid>
@@ -92,14 +94,16 @@
                               Content="Enable background color" />
 
                     <StackPanel Spacing="8" IsVisible="{Binding ShowsBackgroundColorControls}">
-                        <controls:ColorPicker Color="{Binding BackgroundColor}"
-                                              IsAlphaEnabled="False"
-                                              IsAlphaVisible="False"
-                                              IsHexInputVisible="False" />
-
-                        <Grid ColumnDefinitions="Auto,180" ColumnSpacing="12">
-                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Background hex" />
-                            <TextBox Grid.Column="1"
+                        <Grid ColumnDefinitions="Auto,Auto,180"
+                              ColumnSpacing="12"
+                              RowDefinitions="Auto">
+                            <controls:ColorPicker Grid.Column="0"
+                                                  Color="{Binding BackgroundColor}"
+                                                  IsAlphaEnabled="False"
+                                                  IsAlphaVisible="False"
+                                                  IsHexInputVisible="False" />
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="Background hex" />
+                            <TextBox Grid.Column="2"
                                      Text="{Binding BackgroundColorHex, UpdateSourceTrigger=PropertyChanged}"
                                      Watermark="FFFF33" />
                         </Grid>
