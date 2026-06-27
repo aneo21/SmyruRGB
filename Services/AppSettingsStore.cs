@@ -72,6 +72,8 @@ internal sealed class AppSettingsStore
     {
         public string DeviceIdentifier { get; set; } = string.Empty;
 
+        public string? CustomName { get; set; }
+
         public string? LastProfileName { get; set; }
 
         public List<ProfileSettings> Profiles { get; set; } = [];

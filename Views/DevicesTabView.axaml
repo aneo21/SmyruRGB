@@ -1,52 +1,71 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="SmyruRGB.Views.DevicesTabView">
-    <StackPanel Margin="16" Spacing="14">
-        <TextBlock FontSize="20" FontWeight="SemiBold" Text="LED configuration" />
-        <TextBlock Opacity="0.75" Text="Set the number of LEDs for each output channel separately." />
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="14">
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="LED configuration" />
+            <TextBlock Opacity="0.75" Text="Manage profiles and channel settings for all detected devices." />
 
-        <Border Classes="section-card">
-            <StackPanel Spacing="10">
-                <TextBlock FontSize="16" FontWeight="SemiBold" Text="Profiles" />
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Profiles" />
 
-                <Grid ColumnDefinitions="Auto,220,Auto,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="10">
-                    <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Profile name" />
-                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ProfileName}" Watermark="Default" />
-                    <Button Grid.Row="0" Grid.Column="2"
-                            Content="Save profile"
-                            Command="{Binding SaveProfileCommand}" />
+                    <Grid ColumnDefinitions="Auto,220,Auto,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="10">
+                        <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Profile name" />
+                        <TextBox Grid.Row="0"
+                                 Grid.Column="1"
+                                 Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="Default" />
+                        <Button Grid.Row="0" Grid.Column="2"
+                                Content="Save profile"
+                                Command="{Binding SaveProfileCommand}" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Saved profiles" />
-                    <ComboBox Grid.Row="1" Grid.Column="1"
-                              ItemsSource="{Binding AvailableProfiles}"
-                              SelectedItem="{Binding SelectedProfileName}" />
-                    <Button Grid.Row="1" Grid.Column="2"
-                            Content="Load profile"
-                            Command="{Binding LoadProfileCommand}" />
-                    <Button Grid.Row="1" Grid.Column="3"
-                            Content="Refresh devices"
-                            Command="{Binding RefreshCommand}" />
-                </Grid>
-            </StackPanel>
-        </Border>
+                        <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Saved profiles" />
+                        <ComboBox Grid.Row="1" Grid.Column="1"
+                                  ItemsSource="{Binding AvailableProfiles}"
+                                  SelectedItem="{Binding SelectedProfileName}" />
+                        <Button Grid.Row="1" Grid.Column="2"
+                                Content="Load profile"
+                                Command="{Binding LoadProfileCommand}" />
+                        <Button Grid.Row="1" Grid.Column="3"
+                                Content="Refresh devices"
+                                Command="{Binding RefreshCommand}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
 
-        <Border Classes="section-card">
-            <StackPanel Spacing="10">
-                <TextBlock FontSize="16" FontWeight="SemiBold" Text="Per-channel LED counts" />
+            <Border Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Channels by device" />
+                    <TextBlock Opacity="0.75" Text="All detected controller channels grouped by device." TextWrapping="Wrap" />
 
-                <ItemsControl ItemsSource="{Binding ChannelLedSettings}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid ColumnDefinitions="Auto,220,120,Auto" ColumnSpacing="12" Margin="0,0,0,8">
-                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding ChannelNumber, StringFormat='Channel {0}'}" />
-                                <TextBox Grid.Column="1" Text="{Binding ChannelName}" Watermark="Channel name" />
-                                <TextBox Grid.Column="2" Text="{Binding LedCount}" />
-                                <TextBlock Grid.Column="3" VerticalAlignment="Center" Opacity="0.75" Text="{Binding MaxLedCount, StringFormat='Max {0}'}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </Border>
-    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding AllDeviceChannelGroups}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="section-card" Margin="0,0,0,8">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding DeviceName}" />
+                                        <ItemsControl ItemsSource="{Binding Channels}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid ColumnDefinitions="Auto,220,120,Auto" ColumnSpacing="12" Margin="0,0,0,6">
+                                                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding ChannelLabel}" />
+                                                        <TextBox Grid.Column="1"
+                                                                 Text="{Binding ChannelName, UpdateSourceTrigger=PropertyChanged}"
+                                                                 Watermark="Device name" />
+                                                        <TextBox Grid.Column="2" Text="{Binding LedCountText, UpdateSourceTrigger=PropertyChanged}" />
+                                                        <TextBlock Grid.Column="3" VerticalAlignment="Center" Opacity="0.75" Text="{Binding MaxLedCount, StringFormat='Max {0}'}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>

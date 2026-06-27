@@ -1,16 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Threading;
 using Avalonia.Media.Imaging;
 using Avalonia.Markup.Xaml;
-using System.IO;
+using Avalonia.Platform;
+using Avalonia.Threading;
 
 namespace SmyruRGB;
 
 public partial class App : Application
 {
-    private const string TrayIconBase64 = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABmSURBVDhPrdLBDQAQDAVQYzgYwgimMLiFOBH99TVSh3+R36cRIcbUPQl48Joj0Gumwa4CVrkVGYIIQNx2AXZkAViwgIlIAIdYvgN0bRYE3Bv8e0QPoBADmDP8J16y9xVgIdg9Ai8Z4cUgoejTcxgAAAAASUVORK5CYII=";
+    private const string AppIconAssetUri = "avares://SmyruRGB/Assets/Images/elephant-256x256.png";
 
     private MainWindow? _mainWindow;
     private MainWindowViewModel? _mainWindowViewModel;
@@ -30,7 +30,8 @@ public partial class App : Application
             _mainWindowViewModel = new MainWindowViewModel();
             _mainWindow = new MainWindow
             {
-                DataContext = _mainWindowViewModel
+                DataContext = _mainWindowViewModel,
+                Icon = CreateAppWindowIcon()
             };
 
             desktop.MainWindow = _mainWindow;
@@ -46,7 +47,7 @@ public partial class App : Application
     {
         _trayIcon = new TrayIcon
         {
-            Icon = CreateTrayWindowIcon(),
+            Icon = CreateAppWindowIcon(),
             ToolTipText = "SmyruRGB",
             IsVisible = false
         };
@@ -181,10 +182,9 @@ public partial class App : Application
         }
     }
 
-    private static WindowIcon CreateTrayWindowIcon()
+    private static WindowIcon CreateAppWindowIcon()
     {
-        byte[] iconBytes = Convert.FromBase64String(TrayIconBase64);
-        using var stream = new MemoryStream(iconBytes);
+        using var stream = AssetLoader.Open(new Uri(AppIconAssetUri));
         return new WindowIcon(new Bitmap(stream));
     }
 }

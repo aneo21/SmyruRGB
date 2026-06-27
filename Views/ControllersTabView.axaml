@@ -3,54 +3,109 @@
              x:Class="SmyruRGB.Views.ControllersTabView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="16" Spacing="14">
-            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Controller information" />
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Controllers" />
 
-            <Border Classes="section-card">
-                <StackPanel Spacing="10">
-                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Active controller" />
-                    <Grid ColumnDefinitions="Auto,260,Auto" ColumnSpacing="12">
-                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Controller" />
-                        <ComboBox Grid.Column="1"
-                                  ItemsSource="{Binding AvailableControllers}"
-                                  SelectedItem="{Binding SelectedController}">
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding DisplayName}" />
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <Button Grid.Column="2"
-                                Content="Refresh"
-                                Command="{Binding RefreshCommand}" />
-                    </Grid>
-                    <TextBlock Opacity="0.75"
-                               TextWrapping="Wrap"
-                               Text="Choose which connected Nollie controller should receive commands and profiles." />
-                </StackPanel>
-            </Border>
+            <StackPanel IsVisible="{Binding !IsControllerDetailsVisible}" Spacing="14">
+                <Border Classes="section-card">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <TextBlock Grid.Column="0"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Text="Available controllers" />
+                            <Button Grid.Column="1"
+                                    Content="Refresh"
+                                    Command="{Binding RefreshCommand}" />
+                        </Grid>
+                        <TextBlock Opacity="0.75"
+                                   TextWrapping="Wrap"
+                                   Text="All detected controllers are shown below. Click a box to open controller details." />
+                    </StackPanel>
+                </Border>
 
-            <Border Classes="section-card">
-                <StackPanel Spacing="8">
-                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Detected device" />
-                    <TextBlock TextWrapping="Wrap" Text="{Binding DeviceSummary}" />
-                </StackPanel>
-            </Border>
+                <ItemsControl ItemsSource="{Binding AvailableControllers}"
+                              HorizontalAlignment="Stretch"
+                              Margin="-6,0,-6,0">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Classes="controller-card"
+                                    Margin="6,0,6,12"
+                                    Padding="14"
+                                    HorizontalContentAlignment="Stretch"
+                                    Command="{Binding DataContext.OpenControllerDetailsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock FontSize="16"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding ShortDisplayName}" />
+                                        <TextBlock Opacity="0.7"
+                                                   Text="{Binding ChannelCount, StringFormat='Channels: {0}'}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Opacity="0.65"
+                                               Text=">" />
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
 
-            <Border Classes="section-card">
-                <StackPanel Spacing="10">
-                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Connection details" />
-                    <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
-                        <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Connection status" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+            <StackPanel IsVisible="{Binding IsControllerDetailsVisible}" Spacing="14">
+                <Border Classes="section-card">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Button Grid.Column="0"
+                                    Content="Back"
+                                    Command="{Binding BackToControllerListCommand}" />
+                            <TextBlock Grid.Column="1"
+                                       VerticalAlignment="Center"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Text="{Binding SelectedControllerTitle}" />
+                        </Grid>
+                        <TextBlock Opacity="0.75"
+                                   TextWrapping="Wrap"
+                                   Text="Controller details and connection state for the selected device." />
+                    </StackPanel>
+                </Border>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Channel count" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ChannelCount}" />
+                <Border Classes="section-card">
+                    <StackPanel Spacing="8">
+                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="Detected device" />
+                        <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+                            <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Controller label" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Text="{Binding SelectedController.DisplayName}" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Maximum LEDs per channel" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MaxLedsPerChannel}" />
-                    </Grid>
-                </StackPanel>
-            </Border>
+                            <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Detected device" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" TextWrapping="Wrap" Text="{Binding DeviceSummary}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Classes="section-card">
+                    <StackPanel Spacing="10">
+                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="Connection details" />
+                        <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                            <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Connection status" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Channel count" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ChannelCount}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Maximum LEDs per channel" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MaxLedsPerChannel}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>
