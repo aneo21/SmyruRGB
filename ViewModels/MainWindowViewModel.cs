@@ -18,8 +18,7 @@ public class MainWindowViewModel : ReactiveObject
     private readonly AppSettingsStore _settingsStore = new();
     private readonly WindowsStartupRegistration _windowsStartupRegistration = new();
     private readonly Dictionary<string, DeviceDraftState> _deviceDrafts = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Dictionary<int, int>> _groupedDeviceLedCountOverrides = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Dictionary<int, string>> _groupedDeviceChannelNameOverrides = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<int, AppSettingsStore.ChannelSettings>> _groupedDeviceChannelOverrides = new(StringComparer.Ordinal);
     private CancellationTokenSource? _effectCancellationTokenSource;
     private string? _currentDeviceIdentifier;
     private bool _isUpdatingControllerSelection;
@@ -830,20 +829,19 @@ public class MainWindowViewModel : ReactiveObject
 
     private void ResetChannelLedSettings(IReadOnlyList<HidRgbChannelInfo> channels)
     {
-        ChannelLedSetting[] existingSettings = ChannelLedSettings.ToArray();
+        AppSettingsStore.ChannelSettings[] existingSettings = ChannelLedSettings.Select(static setting => setting.ToChannelSettings()).ToArray();
 
         ChannelLedSettings.Clear();
         for (int channelIndex = 0; channelIndex < channels.Count; channelIndex++)
         {
             HidRgbChannelInfo channel = channels[channelIndex];
-            int initialCount = channelIndex < existingSettings.Length
-                ? existingSettings[channelIndex].LedCount
-                : channel.DefaultLedCount;
-            string initialName = channelIndex < existingSettings.Length
-                ? existingSettings[channelIndex].ChannelName
-                : GetDefaultChannelDeviceName(channel.ChannelNumber);
+            AppSettingsStore.ChannelSettings initialSettings = CreateNormalizedChannelSettings(
+                channelIndex < existingSettings.Length ? existingSettings[channelIndex] : null,
+                channel.ChannelNumber,
+                channel.DefaultLedCount,
+                channel.MaxLedCount);
 
-            ChannelLedSetting setting = new(channel.ChannelNumber, initialName, Math.Min(initialCount, channel.MaxLedCount), channel.MaxLedCount);
+            ChannelLedSetting setting = new(channel.ChannelNumber, initialSettings, channel.MaxLedCount);
             setting.PropertyChanged += OnChannelLedSettingChanged;
             ChannelLedSettings.Add(setting);
         }
@@ -853,7 +851,9 @@ public class MainWindowViewModel : ReactiveObject
 
     private void OnChannelLedSettingChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChannelLedSetting.LedCount))
+        if (e.PropertyName is nameof(ChannelLedSetting.LedCount)
+            or nameof(ChannelLedSetting.ChannelName)
+            or nameof(ChannelLedSetting.SelectedDevicePresetOption))
         {
             RebuildAllDeviceChannelGroups();
         }
@@ -1014,11 +1014,7 @@ public class MainWindowViewModel : ReactiveObject
         profile.BackgroundRed = BackgroundR;
         profile.BackgroundGreen = BackgroundG;
         profile.BackgroundBlue = BackgroundB;
-        profile.Channels = ChannelLedSettings.Select(setting => new AppSettingsStore.ChannelSettings
-        {
-            Name = setting.ChannelName,
-            LedCount = setting.LedCount
-        }).ToList();
+        profile.Channels = ChannelLedSettings.Select(static setting => setting.ToChannelSettings()).ToList();
 
         int existingIndex = deviceSettings.Profiles.FindIndex(candidate =>
             string.Equals(candidate.Name, profileName, StringComparison.OrdinalIgnoreCase));
@@ -1093,11 +1089,17 @@ public class MainWindowViewModel : ReactiveObject
             AppSettingsStore.ChannelSettings? savedChannel = channelIndex < profile.Channels.Count
                 ? profile.Channels[channelIndex]
                 : null;
+            int defaultLedCount = channelIndex < _client.Channels.Count
+                ? _client.Channels[channelIndex].DefaultLedCount
+                : setting.LedCount;
 
-            setting.ChannelName = !string.IsNullOrWhiteSpace(savedChannel?.Name)
-                ? savedChannel.Name
-                : GetDefaultChannelDeviceName(setting.ChannelNumber);
-            setting.LedCount = savedChannel?.LedCount ?? setting.LedCount;
+            AppSettingsStore.ChannelSettings normalizedSettings = CreateNormalizedChannelSettings(
+                savedChannel,
+                setting.ChannelNumber,
+                defaultLedCount,
+                setting.MaxLedCount);
+
+            setting.ApplyChannelSettings(normalizedSettings);
         }
 
         RememberCurrentDeviceDraft();
@@ -1113,12 +1115,10 @@ public class MainWindowViewModel : ReactiveObject
             }
 
             bool hasDraft = _deviceDrafts.TryGetValue(controller.DeviceIdentifier, out DeviceDraftState? draft);
-            bool hasLedOverrides = _groupedDeviceLedCountOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, int>? ledOverrides)
-                && ledOverrides.Count > 0;
-            bool hasNameOverrides = _groupedDeviceChannelNameOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, string>? nameOverrides)
-                && nameOverrides.Count > 0;
+            bool hasOverrides = _groupedDeviceChannelOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, AppSettingsStore.ChannelSettings>? channelOverrides)
+                && channelOverrides.Count > 0;
 
-            if (!hasDraft && !hasLedOverrides && !hasNameOverrides)
+            if (!hasDraft && !hasOverrides)
             {
                 continue;
             }
@@ -1130,11 +1130,7 @@ public class MainWindowViewModel : ReactiveObject
                 ?? new AppSettingsStore.ProfileSettings { Name = profileName };
 
             profile.Name = profileName;
-            profile.Channels = BuildDeviceChannelEntries(controller).Select(entry => new AppSettingsStore.ChannelSettings
-            {
-                Name = NormalizeChannelDeviceName(entry.ChannelName, entry.ChannelNumber),
-                LedCount = entry.LedCount
-            }).ToList();
+            profile.Channels = BuildDeviceChannelEntries(controller).Select(static entry => entry.ToChannelSettings()).ToList();
 
             int existingIndex = deviceSettings.Profiles.FindIndex(candidate =>
                 string.Equals(candidate.Name, profileName, StringComparison.OrdinalIgnoreCase));
@@ -1202,11 +1198,7 @@ public class MainWindowViewModel : ReactiveObject
             BackgroundR,
             BackgroundG,
             BackgroundB,
-            ChannelLedSettings.Select(setting => new AppSettingsStore.ChannelSettings
-            {
-                Name = setting.ChannelName,
-                LedCount = setting.LedCount
-            }).ToList());
+            ChannelLedSettings.Select(static setting => setting.ToChannelSettings()).ToList());
 
         RebuildAllDeviceChannelGroups();
     }
@@ -1243,8 +1235,15 @@ public class MainWindowViewModel : ReactiveObject
                 continue;
             }
 
-            ChannelLedSettings[channelIndex].ChannelName = savedChannel.Name;
-            ChannelLedSettings[channelIndex].LedCount = savedChannel.LedCount;
+            int defaultLedCount = channelIndex < _client.Channels.Count
+                ? _client.Channels[channelIndex].DefaultLedCount
+                : ChannelLedSettings[channelIndex].LedCount;
+
+            ChannelLedSettings[channelIndex].ApplyChannelSettings(CreateNormalizedChannelSettings(
+                savedChannel,
+                ChannelLedSettings[channelIndex].ChannelNumber,
+                defaultLedCount,
+                ChannelLedSettings[channelIndex].MaxLedCount));
         }
 
         RebuildAllDeviceChannelGroups();
@@ -1270,11 +1269,9 @@ public class MainWindowViewModel : ReactiveObject
                 controller.DeviceIdentifier,
                 setting.ChannelNumber,
                 $"Channel {setting.ChannelNumber}",
-                setting.ChannelName,
-                setting.LedCount,
+                setting.ToChannelSettings(),
                 setting.MaxLedCount,
-                UpdateGroupedDeviceChannelName,
-                UpdateGroupedDeviceChannelLedCount)).ToArray();
+                UpdateGroupedDeviceChannel)).ToArray();
         }
 
         IReadOnlyList<AppSettingsStore.ChannelSettings>? savedChannels = null;
@@ -1283,96 +1280,65 @@ public class MainWindowViewModel : ReactiveObject
             savedChannels = draft.Channels;
         }
 
-        Dictionary<int, int>? overrides = _groupedDeviceLedCountOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, int>? values)
+        Dictionary<int, AppSettingsStore.ChannelSettings>? overrides = _groupedDeviceChannelOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, AppSettingsStore.ChannelSettings>? values)
             ? values
-            : null;
-        Dictionary<int, string>? nameOverrides = _groupedDeviceChannelNameOverrides.TryGetValue(controller.DeviceIdentifier, out Dictionary<int, string>? names)
-            ? names
             : null;
 
         return controller.Channels.Select((channel, index) =>
         {
-            AppSettingsStore.ChannelSettings? savedChannel = savedChannels is not null && index < savedChannels.Count
+            AppSettingsStore.ChannelSettings? baseSettings = savedChannels is not null && index < savedChannels.Count
                 ? savedChannels[index]
                 : null;
 
-            int ledCount = savedChannel?.LedCount ?? channel.DefaultLedCount;
-            if (overrides is not null && overrides.TryGetValue(channel.ChannelNumber, out int overriddenCount))
+            if (overrides is not null && overrides.TryGetValue(channel.ChannelNumber, out AppSettingsStore.ChannelSettings? overriddenSettings))
             {
-                ledCount = overriddenCount;
+                baseSettings = overriddenSettings;
             }
 
-            string channelName = !string.IsNullOrWhiteSpace(savedChannel?.Name)
-                ? savedChannel.Name
-                : GetDefaultChannelDeviceName(channel.ChannelNumber);
-
-            if (nameOverrides is not null && nameOverrides.TryGetValue(channel.ChannelNumber, out string? overriddenName))
-            {
-                channelName = overriddenName;
-            }
+            AppSettingsStore.ChannelSettings normalizedSettings = CreateNormalizedChannelSettings(
+                baseSettings,
+                channel.ChannelNumber,
+                channel.DefaultLedCount,
+                channel.MaxLedCount);
 
             return new DeviceChannelEntry(
                 controller.DeviceIdentifier,
                 channel.ChannelNumber,
                 $"Channel {channel.ChannelNumber}",
-                channelName,
-                ledCount,
+                normalizedSettings,
                 channel.MaxLedCount,
-                UpdateGroupedDeviceChannelName,
-                UpdateGroupedDeviceChannelLedCount);
+                UpdateGroupedDeviceChannel);
         }).ToArray();
     }
 
-    private void UpdateGroupedDeviceChannelName(DeviceChannelEntry entry)
+    private void UpdateGroupedDeviceChannel(DeviceChannelEntry entry)
     {
-        string normalizedName = NormalizeChannelDeviceName(entry.ChannelName, entry.ChannelNumber);
-        if (!string.Equals(entry.ChannelName, normalizedName, StringComparison.Ordinal))
-        {
-            entry.SetChannelName(normalizedName);
-        }
+        AppSettingsStore.ChannelSettings normalizedSettings = CreateNormalizedChannelSettings(
+            entry.ToChannelSettings(),
+            entry.ChannelNumber,
+            entry.LedCount,
+            entry.MaxLedCount);
+        entry.ApplyChannelSettings(normalizedSettings);
 
         if (!string.IsNullOrWhiteSpace(_currentDeviceIdentifier)
             && string.Equals(entry.DeviceIdentifier, _currentDeviceIdentifier, StringComparison.Ordinal))
         {
             ChannelLedSetting? channelSetting = ChannelLedSettings.FirstOrDefault(setting => setting.ChannelNumber == entry.ChannelNumber);
-            if (channelSetting is not null && !string.Equals(channelSetting.ChannelName, normalizedName, StringComparison.Ordinal))
+            if (channelSetting is not null)
             {
-                channelSetting.ChannelName = normalizedName;
+                channelSetting.ApplyChannelSettings(normalizedSettings);
             }
 
             return;
         }
 
-        if (!_groupedDeviceChannelNameOverrides.TryGetValue(entry.DeviceIdentifier, out Dictionary<int, string>? overrides))
+        if (!_groupedDeviceChannelOverrides.TryGetValue(entry.DeviceIdentifier, out Dictionary<int, AppSettingsStore.ChannelSettings>? overrides))
         {
-            overrides = new Dictionary<int, string>();
-            _groupedDeviceChannelNameOverrides[entry.DeviceIdentifier] = overrides;
+            overrides = new Dictionary<int, AppSettingsStore.ChannelSettings>();
+            _groupedDeviceChannelOverrides[entry.DeviceIdentifier] = overrides;
         }
 
-        overrides[entry.ChannelNumber] = normalizedName;
-    }
-
-    private void UpdateGroupedDeviceChannelLedCount(DeviceChannelEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(_currentDeviceIdentifier)
-            && string.Equals(entry.DeviceIdentifier, _currentDeviceIdentifier, StringComparison.Ordinal))
-        {
-            ChannelLedSetting? channelSetting = ChannelLedSettings.FirstOrDefault(setting => setting.ChannelNumber == entry.ChannelNumber);
-            if (channelSetting is not null && channelSetting.LedCount != entry.LedCount)
-            {
-                channelSetting.LedCount = entry.LedCount;
-            }
-
-            return;
-        }
-
-        if (!_groupedDeviceLedCountOverrides.TryGetValue(entry.DeviceIdentifier, out Dictionary<int, int>? overrides))
-        {
-            overrides = new Dictionary<int, int>();
-            _groupedDeviceLedCountOverrides[entry.DeviceIdentifier] = overrides;
-        }
-
-        overrides[entry.ChannelNumber] = entry.LedCount;
+        overrides[entry.ChannelNumber] = CloneChannelSettings(normalizedSettings);
     }
 
     private static string NormalizeChannelDeviceName(string? deviceName, int channelNumber)
@@ -1382,6 +1348,56 @@ public class MainWindowViewModel : ReactiveObject
     }
 
     private static string GetDefaultChannelDeviceName(int channelNumber) => $"Device {channelNumber}";
+
+    private static AppSettingsStore.ChannelSettings CreateNormalizedChannelSettings(
+        AppSettingsStore.ChannelSettings? source,
+        int channelNumber,
+        int defaultLedCount,
+        int maxLedCount)
+    {
+        ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(source?.DevicePresetId);
+        int ledCount = preset.IsCustom
+            ? Math.Clamp(source?.LedCount ?? defaultLedCount, 1, maxLedCount)
+            : Math.Clamp(preset.DefaultLedCount, 1, maxLedCount);
+
+        string channelName = preset.IsCustom
+            ? NormalizeChannelDeviceName(source?.Name, channelNumber)
+            : preset.DefaultName;
+
+        return new AppSettingsStore.ChannelSettings
+        {
+            DevicePresetId = preset.Id,
+            Name = channelName,
+            LedCount = ledCount,
+            LedAddresses = NormalizeLedAddresses(source?.LedAddresses, ledCount)
+        };
+    }
+
+    private static AppSettingsStore.ChannelSettings CloneChannelSettings(AppSettingsStore.ChannelSettings source)
+    {
+        return new AppSettingsStore.ChannelSettings
+        {
+            DevicePresetId = source.DevicePresetId,
+            Name = source.Name,
+            LedCount = source.LedCount,
+            LedAddresses = [.. source.LedAddresses]
+        };
+    }
+
+    private static List<int> NormalizeLedAddresses(IReadOnlyList<int>? addresses, int ledCount)
+    {
+        List<int> normalizedAddresses = new(ledCount);
+        for (int index = 0; index < ledCount; index++)
+        {
+            int defaultAddress = index;
+            int address = addresses is not null && index < addresses.Count
+                ? Math.Max(0, addresses[index])
+                : defaultAddress;
+            normalizedAddresses.Add(address);
+        }
+
+        return normalizedAddresses;
+    }
 
     private void UpdateSelectedEffectState(IReadOnlyList<AppSettingsStore.EffectParameterSetting>? savedParameters)
     {
@@ -1452,30 +1468,112 @@ public class MainWindowViewModel : ReactiveObject
 
     public sealed class ChannelLedSetting : ReactiveObject
     {
-        private int _ledCount;
+        private ChannelDevicePresetOption _selectedDevicePresetOption;
         private string _channelName;
+        private int _ledCount;
+        private string _ledCountText;
         private int _maxLedCount;
 
-        public ChannelLedSetting(int channelNumber, string channelName, int ledCount, int maxLedCount)
+        internal ChannelLedSetting(int channelNumber, AppSettingsStore.ChannelSettings settings, int maxLedCount)
         {
             ChannelNumber = channelNumber;
-            _channelName = string.IsNullOrWhiteSpace(channelName) ? $"Channel {channelNumber}" : channelName;
             _maxLedCount = Math.Max(1, maxLedCount);
-            _ledCount = Math.Clamp(ledCount, 1, _maxLedCount);
+            _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
+            _ledCount = Math.Clamp(settings.LedCount, 1, _maxLedCount);
+            _ledCountText = _ledCount.ToString(CultureInfo.InvariantCulture);
+            LedAddressSettings = [];
+            ApplyChannelSettings(settings);
         }
 
         public int ChannelNumber { get; }
 
+        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+
+        public ObservableCollection<LedAddressSetting> LedAddressSettings { get; }
+
+        public ChannelDevicePresetOption SelectedDevicePresetOption
+        {
+            get => _selectedDevicePresetOption;
+            set
+            {
+                ChannelDevicePresetOption preset = value ?? ChannelDevicePresetCatalog.FindById(null);
+                if (ReferenceEquals(_selectedDevicePresetOption, preset))
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+                if (!preset.IsCustom)
+                {
+                    _channelName = preset.DefaultName;
+                    _ledCount = Math.Clamp(preset.DefaultLedCount, 1, MaxLedCount);
+                    _ledCountText = _ledCount.ToString(CultureInfo.InvariantCulture);
+                    this.RaisePropertyChanged(nameof(ChannelName));
+                    this.RaisePropertyChanged(nameof(LedCount));
+                    this.RaisePropertyChanged(nameof(LedCountText));
+                    ResetLedAddresses(_ledCount);
+                }
+
+                this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+            }
+        }
+
+        public bool IsCustomDevicePreset => SelectedDevicePresetOption.IsCustom;
+
         public string ChannelName
         {
             get => _channelName;
-            set => this.RaiseAndSetIfChanged(ref _channelName, string.IsNullOrWhiteSpace(value) ? $"Channel {ChannelNumber}" : value.Trim());
+            set => this.RaiseAndSetIfChanged(ref _channelName, NormalizeChannelDeviceName(value, ChannelNumber));
         }
 
         public int LedCount
         {
             get => _ledCount;
-            set => this.RaiseAndSetIfChanged(ref _ledCount, Math.Clamp(value, 1, MaxLedCount));
+            set
+            {
+                int normalizedValue = Math.Clamp(value, 1, MaxLedCount);
+                if (_ledCount == normalizedValue)
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _ledCount, normalizedValue);
+                string normalizedText = normalizedValue.ToString(CultureInfo.InvariantCulture);
+                if (!string.Equals(_ledCountText, normalizedText, StringComparison.Ordinal))
+                {
+                    this.RaiseAndSetIfChanged(ref _ledCountText, normalizedText);
+                }
+
+                ResizeLedAddresses(normalizedValue);
+            }
+        }
+
+        public string LedCountText
+        {
+            get => _ledCountText;
+            set
+            {
+                string normalizedText = value ?? string.Empty;
+                if (_ledCountText == normalizedText)
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _ledCountText, normalizedText);
+
+                if (string.IsNullOrWhiteSpace(normalizedText))
+                {
+                    return;
+                }
+
+                if (!int.TryParse(normalizedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedValue))
+                {
+                    return;
+                }
+
+                LedCount = parsedValue;
+            }
         }
 
         public int MaxLedCount
@@ -1486,6 +1584,110 @@ public class MainWindowViewModel : ReactiveObject
                 int normalizedValue = Math.Max(1, value);
                 this.RaiseAndSetIfChanged(ref _maxLedCount, normalizedValue);
                 LedCount = Math.Clamp(LedCount, 1, normalizedValue);
+            }
+        }
+
+        internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
+        {
+            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+            this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+            this.RaiseAndSetIfChanged(ref _channelName, NormalizeChannelDeviceName(settings.Name, ChannelNumber));
+            int normalizedLedCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
+            this.RaiseAndSetIfChanged(ref _ledCount, normalizedLedCount);
+            string normalizedText = normalizedLedCount.ToString(CultureInfo.InvariantCulture);
+            this.RaiseAndSetIfChanged(ref _ledCountText, normalizedText);
+            ResetLedAddresses(normalizedLedCount, settings.LedAddresses);
+        }
+
+        internal AppSettingsStore.ChannelSettings ToChannelSettings()
+        {
+            return new AppSettingsStore.ChannelSettings
+            {
+                DevicePresetId = SelectedDevicePresetOption.Id,
+                Name = NormalizeChannelDeviceName(ChannelName, ChannelNumber),
+                LedCount = LedCount,
+                LedAddresses = LedAddressSettings.Select(static address => address.Address).ToList()
+            };
+        }
+
+        private void ResetLedAddresses(int ledCount, IReadOnlyList<int>? sourceAddresses = null)
+        {
+            LedAddressSettings.Clear();
+            for (int index = 0; index < ledCount; index++)
+            {
+                int address = sourceAddresses is not null && index < sourceAddresses.Count
+                    ? Math.Max(0, sourceAddresses[index])
+                    : index;
+                LedAddressSettings.Add(new LedAddressSetting(index, address));
+            }
+        }
+
+        private void ResizeLedAddresses(int ledCount)
+        {
+            List<int> existingAddresses = LedAddressSettings.Select(static address => address.Address).ToList();
+            ResetLedAddresses(ledCount, existingAddresses);
+        }
+    }
+
+    public sealed class LedAddressSetting : ReactiveObject
+    {
+        private int _address;
+        private string _addressText;
+
+        public LedAddressSetting(int ledIndex, int address)
+        {
+            LedIndex = ledIndex;
+            _address = Math.Max(0, address);
+            _addressText = _address.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public int LedIndex { get; }
+
+        public int Address
+        {
+            get => _address;
+            set
+            {
+                int normalizedValue = Math.Max(0, value);
+                if (_address == normalizedValue)
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _address, normalizedValue);
+                string normalizedText = normalizedValue.ToString(CultureInfo.InvariantCulture);
+                if (!string.Equals(_addressText, normalizedText, StringComparison.Ordinal))
+                {
+                    this.RaiseAndSetIfChanged(ref _addressText, normalizedText);
+                }
+            }
+        }
+
+        public string AddressText
+        {
+            get => _addressText;
+            set
+            {
+                string normalizedText = value ?? string.Empty;
+                if (_addressText == normalizedText)
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _addressText, normalizedText);
+
+                if (string.IsNullOrWhiteSpace(normalizedText))
+                {
+                    return;
+                }
+
+                if (!int.TryParse(normalizedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedValue))
+                {
+                    return;
+                }
+
+                Address = parsedValue;
             }
         }
     }
@@ -1590,40 +1792,81 @@ public class MainWindowViewModel : ReactiveObject
         public string DeviceName { get; }
 
         public ObservableCollection<DeviceChannelEntry> Channels { get; }
+
+        public int ChannelCount => Channels.Count;
+
+        public int TotalLedCount => Channels.Sum(channel => channel.LedCount);
+
+        public string Summary => $"{ChannelCount} channels, {TotalLedCount} LEDs";
     }
 
     public sealed class DeviceChannelEntry : ReactiveObject
     {
-        private readonly Action<DeviceChannelEntry> _onChannelNameChanged;
-        private readonly Action<DeviceChannelEntry> _onLedCountChanged;
+        private readonly Action<DeviceChannelEntry> _onChannelSettingsChanged;
+        private ChannelDevicePresetOption _selectedDevicePresetOption;
         private string _channelName;
         private int _ledCount;
         private string _ledCountText;
 
-        public DeviceChannelEntry(
+        internal DeviceChannelEntry(
             string deviceIdentifier,
             int channelNumber,
             string channelLabel,
-            string channelName,
-            int ledCount,
+            AppSettingsStore.ChannelSettings settings,
             int maxLedCount,
-            Action<DeviceChannelEntry> onChannelNameChanged,
-            Action<DeviceChannelEntry> onLedCountChanged)
+            Action<DeviceChannelEntry> onChannelSettingsChanged)
         {
             DeviceIdentifier = deviceIdentifier;
             ChannelNumber = channelNumber;
             ChannelLabel = channelLabel;
-            _channelName = NormalizeChannelDeviceName(channelName, channelNumber);
             MaxLedCount = Math.Max(1, maxLedCount);
-            _ledCount = Math.Clamp(ledCount, 1, MaxLedCount);
+            _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
+            _ledCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
             _ledCountText = _ledCount.ToString(CultureInfo.InvariantCulture);
-            _onChannelNameChanged = onChannelNameChanged;
-            _onLedCountChanged = onLedCountChanged;
+            LedAddressSettings = [];
+            _onChannelSettingsChanged = onChannelSettingsChanged;
+            ApplyChannelSettings(settings);
         }
 
         internal string DeviceIdentifier { get; }
 
         internal int ChannelNumber { get; }
+
+        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+
+        public ObservableCollection<LedAddressSetting> LedAddressSettings { get; }
+
+        public ChannelDevicePresetOption SelectedDevicePresetOption
+        {
+            get => _selectedDevicePresetOption;
+            set
+            {
+                ChannelDevicePresetOption preset = value ?? ChannelDevicePresetCatalog.FindById(null);
+                if (ReferenceEquals(_selectedDevicePresetOption, preset))
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+                if (!preset.IsCustom)
+                {
+                    this.RaiseAndSetIfChanged(ref _channelName, preset.DefaultName);
+                    int presetLedCount = Math.Clamp(preset.DefaultLedCount, 1, MaxLedCount);
+                    this.RaiseAndSetIfChanged(ref _ledCount, presetLedCount);
+                    this.RaiseAndSetIfChanged(ref _ledCountText, presetLedCount.ToString(CultureInfo.InvariantCulture));
+                    ResetLedAddresses(presetLedCount);
+                    this.RaisePropertyChanged(nameof(ChannelName));
+                    this.RaisePropertyChanged(nameof(LedCount));
+                    this.RaisePropertyChanged(nameof(LedCountText));
+                }
+
+                this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+                _onChannelSettingsChanged(this);
+            }
+        }
+
+        public bool IsCustomDevicePreset => SelectedDevicePresetOption.IsCustom;
 
         public string ChannelName
         {
@@ -1637,13 +1880,8 @@ public class MainWindowViewModel : ReactiveObject
                 }
 
                 this.RaiseAndSetIfChanged(ref _channelName, normalizedValue);
-                _onChannelNameChanged(this);
+                _onChannelSettingsChanged(this);
             }
-        }
-
-        internal void SetChannelName(string channelName)
-        {
-            this.RaiseAndSetIfChanged(ref _channelName, channelName);
         }
 
         public string ChannelLabel { get; }
@@ -1666,7 +1904,8 @@ public class MainWindowViewModel : ReactiveObject
                     this.RaiseAndSetIfChanged(ref _ledCountText, normalizedText);
                 }
 
-                _onLedCountChanged(this);
+                ResizeLedAddresses(normalizedValue);
+                _onChannelSettingsChanged(this);
             }
         }
 
@@ -1709,6 +1948,47 @@ public class MainWindowViewModel : ReactiveObject
         }
 
         public int MaxLedCount { get; }
+
+        internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
+        {
+            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+            this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+            this.RaiseAndSetIfChanged(ref _channelName, NormalizeChannelDeviceName(settings.Name, ChannelNumber));
+            int normalizedLedCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
+            this.RaiseAndSetIfChanged(ref _ledCount, normalizedLedCount);
+            this.RaiseAndSetIfChanged(ref _ledCountText, normalizedLedCount.ToString(CultureInfo.InvariantCulture));
+            ResetLedAddresses(normalizedLedCount, settings.LedAddresses);
+        }
+
+        internal AppSettingsStore.ChannelSettings ToChannelSettings()
+        {
+            return new AppSettingsStore.ChannelSettings
+            {
+                DevicePresetId = SelectedDevicePresetOption.Id,
+                Name = NormalizeChannelDeviceName(ChannelName, ChannelNumber),
+                LedCount = LedCount,
+                LedAddresses = LedAddressSettings.Select(static address => address.Address).ToList()
+            };
+        }
+
+        private void ResetLedAddresses(int ledCount, IReadOnlyList<int>? sourceAddresses = null)
+        {
+            LedAddressSettings.Clear();
+            for (int index = 0; index < ledCount; index++)
+            {
+                int address = sourceAddresses is not null && index < sourceAddresses.Count
+                    ? Math.Max(0, sourceAddresses[index])
+                    : index;
+                LedAddressSettings.Add(new LedAddressSetting(index, address));
+            }
+        }
+
+        private void ResizeLedAddresses(int ledCount)
+        {
+            List<int> existingAddresses = LedAddressSettings.Select(static address => address.Address).ToList();
+            ResetLedAddresses(ledCount, existingAddresses);
+        }
     }
 
     private sealed record DeviceDraftState(

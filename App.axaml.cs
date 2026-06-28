@@ -160,7 +160,7 @@ public partial class App : Application
         }
 
         _mainWindow.Show();
-        _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.WindowState = WindowState.Maximized;
         _mainWindow.Activate();
 
         if (_trayIcon is not null)

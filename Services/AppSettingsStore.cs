@@ -108,9 +108,13 @@ internal sealed class AppSettingsStore
 
     internal sealed class ChannelSettings
     {
+        public string DevicePresetId { get; set; } = ChannelDevicePresetCatalog.CustomPresetId;
+
         public string Name { get; set; } = string.Empty;
 
         public int LedCount { get; set; }
+
+        public List<int> LedAddresses { get; set; } = [];
     }
 
     internal sealed class EffectParameterSetting

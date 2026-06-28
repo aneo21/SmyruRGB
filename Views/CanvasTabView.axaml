@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SmyruRGB.Views.CanvasTabView">
+    <Grid Margin="16" RowDefinitions="Auto,*" RowSpacing="14">
+        <StackPanel Spacing="6">
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Canvas" />
+            <TextBlock Opacity="0.75" Text="Workspace for future visual editing and previews." />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnDefinitions="2*,*" ColumnSpacing="16">
+            <Border Grid.Column="0" Classes="section-card">
+                <Canvas Height="360"
+                        HorizontalAlignment="Stretch"
+                        Background="#111827"
+                        ClipToBounds="True">
+                    <Border Canvas.Left="28"
+                            Canvas.Top="28"
+                            Width="180"
+                            Height="96"
+                            Background="#1F2937"
+                            BorderBrush="#60A5FA"
+                            BorderThickness="1"
+                            CornerRadius="10" />
+
+                    <TextBlock Canvas.Left="44"
+                               Canvas.Top="62"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="#E5E7EB"
+                               Text="Canvas area" />
+
+                    <TextBlock Canvas.Left="44"
+                               Canvas.Top="88"
+                               Opacity="0.8"
+                               Foreground="#E5E7EB"
+                               Text="Ready for custom controls." />
+                </Canvas>
+            </Border>
+
+            <Border Grid.Column="1" Classes="section-card">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="LED devices" />
+                    <TextBlock Opacity="0.75"
+                               Text="Detected LED devices and their channel layout."
+                               TextWrapping="Wrap" />
+
+                    <ScrollViewer MaxHeight="360"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding AllDeviceChannelGroups}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Classes="section-card" Margin="0,0,0,8">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding DeviceName}" />
+                                            <TextBlock Opacity="0.75" Text="{Binding Summary}" />
+
+                                            <ItemsControl ItemsSource="{Binding Channels}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding ChannelName}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Opacity="0.75"
+                                                                       Text="{Binding LedCount, StringFormat='{}{0} LEDs'}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
