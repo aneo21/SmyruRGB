@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Threading;
 using Avalonia.Media;
 using ReactiveUI;
@@ -14,12 +15,25 @@ namespace SmyruRGB;
 
 public class MainWindowViewModel : ReactiveObject
 {
+    private const double CanvasDeviceWidth = 0.28;
+    private const double CanvasDevicePadding = 0.018;
+    private const double CanvasDeviceHeaderHeight = 0.052;
+    private const double CanvasChannelGap = 0.018;
+    private const double CanvasBarHeight = 0.12;
+    private const double CanvasPizzaHeight = 0.22;
+    private const double CanvasKeyboardHeight = 0.18;
+    private const int CanvasBackgroundColumns = 40;
+    private const int CanvasBackgroundRows = 24;
+
     private readonly SmyruRgbHidClient _client = new();
     private readonly AppSettingsStore _settingsStore = new();
     private readonly WindowsStartupRegistration _windowsStartupRegistration = new();
     private readonly Dictionary<string, DeviceDraftState> _deviceDrafts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<int, AppSettingsStore.ChannelSettings>> _groupedDeviceChannelOverrides = new(StringComparer.Ordinal);
+    private readonly DispatcherTimer _canvasPreviewTimer;
     private CancellationTokenSource? _effectCancellationTokenSource;
+    private long _canvasPreviewTick;
+    private Views.CanvasPreviewSceneSnapshot? _canvasPreviewScene;
     private string? _currentDeviceIdentifier;
     private bool _isUpdatingControllerSelection;
     private bool _isLoadingUiSettings;
@@ -42,6 +56,19 @@ public class MainWindowViewModel : ReactiveObject
         BackToControllerListCommand = ReactiveCommand.Create(CloseControllerDetails);
         ApplyColorCommand = ReactiveCommand.Create(StartSelectedEffect, this.WhenAnyValue(x => x.IsConnected));
         StopEffectCommand = ReactiveCommand.Create(StopActiveEffect, this.WhenAnyValue(x => x.IsEffectRunning));
+        SelectAllCanvasDevicesCommand = ReactiveCommand.Create(() => SetCanvasDeviceSelection(true));
+        ClearCanvasDeviceSelectionCommand = ReactiveCommand.Create(() => SetCanvasDeviceSelection(false));
+        MoveCanvasDeviceCommand = ReactiveCommand.Create<Views.CanvasDeviceMoveRequest>(MoveCanvasDevice);
+
+        _canvasPreviewTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(33)
+        };
+        _canvasPreviewTimer.Tick += (_, _) =>
+        {
+            _canvasPreviewTick++;
+            RefreshCanvasPreview();
+        };
 
         ResetChannelLedSettings(_client.Channels);
         foreach (ILedEffect effect in EffectCatalog.All)
@@ -55,6 +82,8 @@ public class MainWindowViewModel : ReactiveObject
         UpdateSelectedEffectState(null);
 
         RefreshConnection(true);
+        RefreshCanvasPreview();
+        _canvasPreviewTimer.Start();
     }
 
     private int _r = 255;
@@ -259,10 +288,17 @@ public class MainWindowViewModel : ReactiveObject
     public ObservableCollection<ChannelLedSetting> ChannelLedSettings { get; } = [];
     public ObservableCollection<ControllerOption> AvailableControllers { get; } = [];
     public ObservableCollection<DeviceChannelGroup> AllDeviceChannelGroups { get; } = [];
+    public ObservableCollection<DeviceChannelGroup> CanvasDeviceChannelGroups { get; } = [];
     public ObservableCollection<string> AvailableProfiles { get; } = [];
     public ObservableCollection<string> AvailableEffects { get; } = [];
     public ObservableCollection<EffectParameterSetting> EffectParameters { get; } = [];
     public ObservableCollection<EffectParameterGroup> EffectParameterGroups { get; } = [];
+
+    public Views.CanvasPreviewSceneSnapshot? CanvasPreviewScene
+    {
+        get => _canvasPreviewScene;
+        private set => this.RaiseAndSetIfChanged(ref _canvasPreviewScene, value);
+    }
 
     public bool IsControllerDetailsVisible
     {
@@ -507,6 +543,9 @@ public class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<ControllerOption, Unit> OpenControllerDetailsCommand { get; }
     public ReactiveCommand<Unit, Unit> BackToControllerListCommand { get; }
     public ReactiveCommand<Unit, Unit> StopEffectCommand { get; }
+    public ReactiveCommand<Unit, Unit> SelectAllCanvasDevicesCommand { get; }
+    public ReactiveCommand<Unit, Unit> ClearCanvasDeviceSelectionCommand { get; }
+    public ReactiveCommand<Views.CanvasDeviceMoveRequest, Unit> MoveCanvasDeviceCommand { get; }
 
     private void RefreshConnection(bool restoreProfileOnStartup)
     {
@@ -754,6 +793,7 @@ public class MainWindowViewModel : ReactiveObject
             new LedColor((byte)BackgroundR, (byte)BackgroundG, (byte)BackgroundB),
             EffectSpeed,
             ChannelLedSettings.Select(setting => setting.LedCount).ToArray(),
+            ChannelLedSettings.Select(setting => CreateEffectLedLocations(setting.PreviewLayout)).ToArray(),
             ChannelLedSettings.Select(setting => setting.ChannelName).ToArray(),
             ChannelLedSettings.Count,
             tick,
@@ -768,10 +808,45 @@ public class MainWindowViewModel : ReactiveObject
             new LedColor((byte)BackgroundR, (byte)BackgroundG, (byte)BackgroundB),
             EffectSpeed,
             channels.Select(channel => channel.LedCount).ToArray(),
+            channels.Select(channel => CreateEffectLedLocations(channel.PreviewLayout)).ToArray(),
             channels.Select(channel => NormalizeChannelDeviceName(channel.ChannelName, channel.ChannelNumber)).ToArray(),
             channels.Count,
             tick,
             EffectParameters.ToDictionary(parameter => parameter.Key, parameter => parameter.Value, StringComparer.Ordinal));
+    }
+
+    private static IReadOnlyList<EffectLedLocation> CreateEffectLedLocations(ChannelDeviceLayout layout)
+    {
+        return layout.Leds
+            .Select(led => new EffectLedLocation(
+                led.LedIndex,
+                led.X,
+                led.Y,
+                GetAxisPosition(layout.ShapeKind, led),
+                Math.Sqrt(Math.Pow(led.X - 0.5, 2) + Math.Pow(led.Y - 0.5, 2)),
+                NormalizeAngle(led.StartAngleDegrees + (led.SweepAngleDegrees / 2.0))))
+            .ToArray();
+    }
+
+    private static double GetAxisPosition(DeviceShapeKind shapeKind, ChannelDeviceLedLayout led)
+    {
+        return shapeKind switch
+        {
+            DeviceShapeKind.Pizza => NormalizeAngle(led.StartAngleDegrees + (led.SweepAngleDegrees / 2.0)),
+            DeviceShapeKind.Keyboard => led.Y,
+            _ => led.X
+        };
+    }
+
+    private static double NormalizeAngle(double angleDegrees)
+    {
+        double normalized = angleDegrees % 360.0;
+        if (normalized < 0)
+        {
+            normalized += 360.0;
+        }
+
+        return normalized / 360.0;
     }
 
     private bool TryCreateDeviceFrameRequests(
@@ -781,29 +856,21 @@ public class MainWindowViewModel : ReactiveObject
         out int delayMilliseconds,
         out string message)
     {
+        IReadOnlyList<CanvasDeviceRenderState> renderedDevices = CreateCanvasRenderStates(includeSelectedOnly: false, tick, out delayMilliseconds);
         List<SmyruRgbHidClient.DeviceFrameRequest> requests = [];
-        delayMilliseconds = 33;
         message = string.Empty;
 
-        foreach (ControllerOption controller in AvailableControllers)
+        foreach (IGrouping<string, CanvasDeviceRenderState> controllerGroup in renderedDevices.GroupBy(device => device.ControllerDeviceIdentifier, StringComparer.Ordinal))
         {
-            IReadOnlyList<DeviceChannelEntry> channels = BuildDeviceChannelEntries(controller);
-            if (channels.Count == 0)
-            {
-                continue;
-            }
+            List<CanvasChannelRenderState> channels = controllerGroup
+                .SelectMany(device => device.Channels)
+                .OrderBy(channel => channel.Channel.ChannelNumber)
+                .ToList();
 
-            EffectFrame frame = effect.CreateFrame(CreateEffectContext(channels, tick));
             requests.Add(new SmyruRgbHidClient.DeviceFrameRequest(
-                controller.DeviceIdentifier,
-                frame.ChannelLeds,
-                channels.Select(channel => channel.LedCount).ToArray()));
-
-            if (requests.Count == 1
-                || string.Equals(controller.DeviceIdentifier, _currentDeviceIdentifier, StringComparison.Ordinal))
-            {
-                delayMilliseconds = frame.DelayMilliseconds;
-            }
+                controllerGroup.Key,
+                channels.Select(channel => (IReadOnlyList<LedColor>)channel.LedColors).ToArray(),
+                channels.Select(channel => channel.Channel.LedCount).ToArray()));
         }
 
         if (requests.Count == 0)
@@ -815,6 +882,264 @@ public class MainWindowViewModel : ReactiveObject
 
         deviceRequests = requests;
         return true;
+    }
+
+    private void SetCanvasDeviceSelection(bool isSelected)
+    {
+        foreach (DeviceChannelGroup group in CanvasDeviceChannelGroups)
+        {
+            group.IsSelectedForCanvas = isSelected;
+        }
+
+        RefreshCanvasPreview();
+    }
+
+    private void RefreshCanvasPreview()
+    {
+        CanvasPreviewScene = CreateCanvasPreviewSnapshot(_canvasPreviewTick);
+    }
+
+    public Views.CanvasPreviewSceneSnapshot CreateCanvasPreviewSnapshot(long tick)
+    {
+        IReadOnlyList<CanvasDeviceRenderState> renderedDevices = CreateCanvasRenderStates(includeSelectedOnly: true, tick, out _);
+        IReadOnlyList<Views.CanvasPreviewBackgroundCellSnapshot> background = CreateCanvasBackgroundSnapshot(tick);
+
+        return new Views.CanvasPreviewSceneSnapshot(
+            background,
+            renderedDevices.Select(device => new Views.CanvasPreviewDeviceSnapshot(
+                device.DeviceIdentifier,
+                device.DeviceName,
+                device.Bounds,
+                device.Channels.Select(channel => new Views.CanvasPreviewChannelSnapshot(
+                    channel.Channel.ChannelLabel,
+                    channel.Channel.ChannelName,
+                    GetShapeDisplayName(channel.Channel.DeviceShapeKind),
+                    channel.Channel.PreviewLayout,
+                    channel.Bounds,
+                    channel.LedColors.Select(static color => Color.FromRgb(color.Red, color.Green, color.Blue)).ToArray()))
+                    .ToArray()))
+                .ToArray());
+    }
+
+    private IReadOnlyList<Views.CanvasPreviewBackgroundCellSnapshot> CreateCanvasBackgroundSnapshot(long tick)
+    {
+        List<CanvasBackgroundSampleState> backgroundCells = new(CanvasBackgroundColumns * CanvasBackgroundRows);
+        List<Point> samplePoints = new(backgroundCells.Capacity);
+
+        double cellWidth = 1.0 / CanvasBackgroundColumns;
+        double cellHeight = 1.0 / CanvasBackgroundRows;
+
+        for (int row = 0; row < CanvasBackgroundRows; row++)
+        {
+            for (int column = 0; column < CanvasBackgroundColumns; column++)
+            {
+                Rect bounds = new(column * cellWidth, row * cellHeight, cellWidth + 0.0005, cellHeight + 0.0005);
+                Point center = new(bounds.X + (bounds.Width / 2.0), bounds.Y + (bounds.Height / 2.0));
+                backgroundCells.Add(new CanvasBackgroundSampleState(bounds, samplePoints.Count));
+                samplePoints.Add(center);
+            }
+        }
+
+        IReadOnlyList<LedColor> colors = SampleCanvasEffectColors(samplePoints, tick, out _);
+        return backgroundCells.Select(cell => new Views.CanvasPreviewBackgroundCellSnapshot(
+            cell.Bounds,
+            ToAvaloniaColor(colors[cell.SampleIndex]))).ToArray();
+    }
+
+    private IReadOnlyList<CanvasDeviceRenderState> CreateCanvasRenderStates(bool includeSelectedOnly, long tick, out int delayMilliseconds)
+    {
+        List<CanvasDeviceLayoutState> devices = CanvasDeviceChannelGroups
+            .Where(group => !includeSelectedOnly || group.IsSelectedForCanvas)
+            .Select(CreateCanvasDeviceLayoutState)
+            .Where(static device => device.Channels.Count > 0)
+            .ToList();
+
+        if (devices.Count == 0)
+        {
+            delayMilliseconds = 33;
+            return [];
+        }
+
+        List<Point> samplePoints = [];
+        Dictionary<(string DeviceIdentifier, int ChannelNumber, int LedIndex), List<int>> ledSamples = new();
+
+        foreach (CanvasDeviceLayoutState device in devices)
+        {
+            foreach (CanvasChannelLayoutState channel in device.Channels)
+            {
+                foreach (ChannelDeviceLedLayout led in channel.Channel.PreviewLayout.Leds)
+                {
+                    List<int> indices = [];
+                    foreach (Point samplePoint in CreateLedCaptureSamplePoints(channel.Bounds, led))
+                    {
+                        indices.Add(samplePoints.Count);
+                        samplePoints.Add(samplePoint);
+                    }
+
+                    ledSamples[(device.DeviceIdentifier, channel.Channel.ChannelNumber, led.LedIndex)] = indices;
+                }
+            }
+        }
+
+        IReadOnlyList<LedColor> sampledColors = SampleCanvasEffectColors(samplePoints, tick, out delayMilliseconds);
+        return devices.Select(device => new CanvasDeviceRenderState(
+            device.DeviceIdentifier,
+            device.ControllerDeviceIdentifier,
+            device.DeviceName,
+            device.Bounds,
+            device.Channels.Select(channel => new CanvasChannelRenderState(
+                channel.Channel,
+                channel.Bounds,
+                channel.Channel.PreviewLayout.Leds
+                    .Select(led => AverageLedColors(
+                        sampledColors,
+                        ledSamples[(device.DeviceIdentifier, channel.Channel.ChannelNumber, led.LedIndex)]))
+                    .ToArray()))
+                .ToArray())).ToArray();
+    }
+
+    private IReadOnlyList<LedColor> SampleCanvasEffectColors(IReadOnlyList<Point> samplePoints, long tick, out int delayMilliseconds)
+    {
+        if (samplePoints.Count == 0)
+        {
+            delayMilliseconds = 33;
+            return [];
+        }
+
+        EffectContext context = new(
+            new LedColor((byte)R, (byte)G, (byte)B),
+            SupportsBackgroundColor && BackgroundColorEnabled,
+            new LedColor((byte)BackgroundR, (byte)BackgroundG, (byte)BackgroundB),
+            EffectSpeed,
+            [samplePoints.Count],
+            [samplePoints.Select(CreateCanvasEffectLedLocation).ToArray()],
+            ["Canvas"],
+            1,
+            tick,
+            EffectParameters.ToDictionary(parameter => parameter.Key, parameter => parameter.Value, StringComparer.Ordinal));
+
+        EffectFrame frame = EffectCatalog.FindByName(SelectedEffectName).CreateFrame(context);
+        delayMilliseconds = frame.DelayMilliseconds;
+        return frame.ChannelLeds[0].ToArray();
+    }
+
+    private static EffectLedLocation CreateCanvasEffectLedLocation(Point point, int ledIndex)
+    {
+        double deltaX = point.X - 0.5;
+        double deltaY = point.Y - 0.5;
+        double angleDegrees = Math.Atan2(deltaY, deltaX) * 180.0 / Math.PI;
+        return new EffectLedLocation(
+            ledIndex,
+            point.X,
+            point.Y,
+            point.X,
+            Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY)),
+            NormalizeAngle(angleDegrees));
+    }
+
+    private static CanvasDeviceLayoutState CreateCanvasDeviceLayoutState(DeviceChannelGroup group)
+    {
+        IReadOnlyList<DeviceChannelEntry> channels = group.Channels.ToArray();
+        double height = GetCanvasDeviceHeight(channels);
+        Rect bounds = new(group.CanvasLeft, group.CanvasTop, CanvasDeviceWidth, height);
+        double channelWidth = Math.Max(0.08, CanvasDeviceWidth - (CanvasDevicePadding * 2));
+        double currentTop = group.CanvasTop + CanvasDevicePadding + CanvasDeviceHeaderHeight;
+        List<CanvasChannelLayoutState> channelStates = new(channels.Count);
+
+        foreach (DeviceChannelEntry channel in channels)
+        {
+            double channelHeight = GetChannelPreviewHeight(channel.DeviceShapeKind);
+            Rect channelBounds = new(group.CanvasLeft + CanvasDevicePadding, currentTop, channelWidth, channelHeight);
+            channelStates.Add(new CanvasChannelLayoutState(channel, channelBounds));
+            currentTop += channelHeight + CanvasChannelGap;
+        }
+
+        return new CanvasDeviceLayoutState(group.DeviceIdentifier, group.ControllerDeviceIdentifier, group.DeviceName, bounds, channelStates);
+    }
+
+    private static IReadOnlyList<Point> CreateLedCaptureSamplePoints(Rect channelBounds, ChannelDeviceLedLayout led)
+    {
+        Point center = new(
+            channelBounds.X + (channelBounds.Width * led.X),
+            channelBounds.Y + (channelBounds.Height * led.Y));
+        double radius = Math.Max(0.004, Math.Min(channelBounds.Width, channelBounds.Height) * 0.045);
+
+        return
+        [
+            ClampToCanvas(center),
+            ClampToCanvas(new Point(center.X - radius, center.Y)),
+            ClampToCanvas(new Point(center.X + radius, center.Y)),
+            ClampToCanvas(new Point(center.X, center.Y - radius)),
+            ClampToCanvas(new Point(center.X, center.Y + radius))
+        ];
+    }
+
+    private static LedColor AverageLedColors(IReadOnlyList<LedColor> source, IReadOnlyList<int> indices)
+    {
+        if (indices.Count == 0)
+        {
+            return LedColor.Black;
+        }
+
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+        foreach (int index in indices)
+        {
+            LedColor color = source[index];
+            red += color.Red;
+            green += color.Green;
+            blue += color.Blue;
+        }
+
+        return new LedColor(
+            (byte)(red / indices.Count),
+            (byte)(green / indices.Count),
+            (byte)(blue / indices.Count));
+    }
+
+    private static Point ClampToCanvas(Point point)
+    {
+        return new Point(
+            Math.Clamp(point.X, 0, 1),
+            Math.Clamp(point.Y, 0, 1));
+    }
+
+    private static double GetCanvasDeviceHeight(IReadOnlyList<DeviceChannelEntry> channels)
+    {
+        if (channels.Count == 0)
+        {
+            return CanvasDevicePadding + CanvasDeviceHeaderHeight + CanvasDevicePadding;
+        }
+
+        double channelsHeight = channels.Sum(channel => GetChannelPreviewHeight(channel.DeviceShapeKind));
+        double gaps = Math.Max(0, channels.Count - 1) * CanvasChannelGap;
+        return CanvasDevicePadding + CanvasDeviceHeaderHeight + channelsHeight + gaps + CanvasDevicePadding;
+    }
+
+    private static double GetChannelPreviewHeight(DeviceShapeKind shapeKind)
+    {
+        return shapeKind switch
+        {
+            DeviceShapeKind.Pizza => CanvasPizzaHeight,
+            DeviceShapeKind.Keyboard => CanvasKeyboardHeight,
+            _ => CanvasBarHeight
+        };
+    }
+
+    private static string GetShapeDisplayName(DeviceShapeKind shapeKind)
+    {
+        return shapeKind switch
+        {
+            DeviceShapeKind.Pizza => "Pizza",
+            DeviceShapeKind.Keyboard => "Klawiatura",
+            _ => "Pasek"
+        };
+    }
+
+    private static Color ToAvaloniaColor(LedColor color)
+    {
+        return Color.FromRgb(color.Red, color.Green, color.Blue);
     }
 
     private void ReportSendFailure(string failureMessage)
@@ -853,7 +1178,8 @@ public class MainWindowViewModel : ReactiveObject
     {
         if (e.PropertyName is nameof(ChannelLedSetting.LedCount)
             or nameof(ChannelLedSetting.ChannelName)
-            or nameof(ChannelLedSetting.SelectedDevicePresetOption))
+            or nameof(ChannelLedSetting.SelectedDevicePresetOption)
+            or nameof(ChannelLedSetting.SelectedDeviceShapeOption))
         {
             RebuildAllDeviceChannelGroups();
         }
@@ -1251,13 +1577,84 @@ public class MainWindowViewModel : ReactiveObject
 
     private void RebuildAllDeviceChannelGroups()
     {
-        AllDeviceChannelGroups.Clear();
+        Dictionary<string, bool> selectionByDevice = CanvasDeviceChannelGroups.ToDictionary(
+            group => group.DeviceIdentifier,
+            group => group.IsSelectedForCanvas,
+            StringComparer.Ordinal);
+        Dictionary<string, Point> positionByDevice = CanvasDeviceChannelGroups.ToDictionary(
+            group => group.DeviceIdentifier,
+            group => new Point(group.CanvasLeft, group.CanvasTop),
+            StringComparer.Ordinal);
 
-        foreach (ControllerOption controller in AvailableControllers)
+        AllDeviceChannelGroups.Clear();
+        CanvasDeviceChannelGroups.Clear();
+
+        int deviceIndex = 0;
+        for (int controllerIndex = 0; controllerIndex < AvailableControllers.Count; controllerIndex++)
         {
+            ControllerOption controller = AvailableControllers[controllerIndex];
             IReadOnlyList<DeviceChannelEntry> channels = BuildDeviceChannelEntries(controller);
-            AllDeviceChannelGroups.Add(new DeviceChannelGroup(controller.DeviceIdentifier, controller.ShortDisplayName, channels));
+            AllDeviceChannelGroups.Add(new DeviceChannelGroup(
+                controller.DeviceIdentifier,
+                controller.DeviceIdentifier,
+                controller.ShortDisplayName,
+                controller.ShortDisplayName,
+                channels));
+
+            foreach (DeviceChannelEntry channel in channels)
+            {
+                string groupIdentifier = GetCanvasGroupIdentifier(controller.DeviceIdentifier, channel.ChannelNumber);
+                bool isSelected = !selectionByDevice.TryGetValue(groupIdentifier, out bool previousSelection) || previousSelection;
+                Point position = positionByDevice.TryGetValue(groupIdentifier, out Point previousPosition)
+                    ? previousPosition
+                    : GetDefaultCanvasPosition(deviceIndex);
+                CanvasDeviceChannelGroups.Add(new DeviceChannelGroup(
+                    groupIdentifier,
+                    controller.DeviceIdentifier,
+                    channel.ChannelName,
+                    controller.ShortDisplayName,
+                    [channel],
+                    isSelected,
+                    position.X,
+                    position.Y));
+                deviceIndex++;
+            }
         }
+
+        RefreshCanvasPreview();
+    }
+
+    private void MoveCanvasDevice(Views.CanvasDeviceMoveRequest request)
+    {
+        DeviceChannelGroup? device = CanvasDeviceChannelGroups.FirstOrDefault(group =>
+            string.Equals(group.DeviceIdentifier, request.DeviceIdentifier, StringComparison.Ordinal));
+        if (device is null)
+        {
+            return;
+        }
+
+        double maxLeft = Math.Max(0, 1 - CanvasDeviceWidth);
+        double maxTop = Math.Max(0, 1 - GetCanvasDeviceHeight(device.Channels.ToArray()));
+        device.CanvasLeft = Math.Clamp(request.Left, 0, maxLeft);
+        device.CanvasTop = Math.Clamp(request.Top, 0, maxTop);
+        RefreshCanvasPreview();
+    }
+
+    private static Point GetDefaultCanvasPosition(int index)
+    {
+        int columns = 3;
+        int column = index % columns;
+        int row = index / columns;
+        double left = 0.04 + (column * 0.31);
+        double top = 0.05 + (row * 0.34);
+        return new Point(Math.Min(left, 0.68), Math.Min(top, 0.82));
+    }
+
+    private static string GetCanvasGroupIdentifier(string controllerIdentifier, int channelNumber)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{controllerIdentifier}::channel-{channelNumber}");
     }
 
     private IReadOnlyList<DeviceChannelEntry> BuildDeviceChannelEntries(ControllerOption controller)
@@ -1356,6 +1753,10 @@ public class MainWindowViewModel : ReactiveObject
         int maxLedCount)
     {
         ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(source?.DevicePresetId);
+        ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(
+            string.IsNullOrWhiteSpace(source?.DeviceShapeId)
+                ? preset.DefaultShapeId
+                : source!.DeviceShapeId);
         int ledCount = preset.IsCustom
             ? Math.Clamp(source?.LedCount ?? defaultLedCount, 1, maxLedCount)
             : Math.Clamp(preset.DefaultLedCount, 1, maxLedCount);
@@ -1367,6 +1768,7 @@ public class MainWindowViewModel : ReactiveObject
         return new AppSettingsStore.ChannelSettings
         {
             DevicePresetId = preset.Id,
+            DeviceShapeId = shape.Id,
             Name = channelName,
             LedCount = ledCount,
             LedAddresses = NormalizeLedAddresses(source?.LedAddresses, ledCount)
@@ -1378,6 +1780,7 @@ public class MainWindowViewModel : ReactiveObject
         return new AppSettingsStore.ChannelSettings
         {
             DevicePresetId = source.DevicePresetId,
+            DeviceShapeId = source.DeviceShapeId,
             Name = source.Name,
             LedCount = source.LedCount,
             LedAddresses = [.. source.LedAddresses]
@@ -1469,6 +1872,7 @@ public class MainWindowViewModel : ReactiveObject
     public sealed class ChannelLedSetting : ReactiveObject
     {
         private ChannelDevicePresetOption _selectedDevicePresetOption;
+        private ChannelDeviceShapeOption _selectedDeviceShapeOption;
         private string _channelName;
         private int _ledCount;
         private string _ledCountText;
@@ -1479,6 +1883,7 @@ public class MainWindowViewModel : ReactiveObject
             ChannelNumber = channelNumber;
             _maxLedCount = Math.Max(1, maxLedCount);
             _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _selectedDeviceShapeOption = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
             _ledCount = Math.Clamp(settings.LedCount, 1, _maxLedCount);
             _ledCountText = _ledCount.ToString(CultureInfo.InvariantCulture);
@@ -1489,6 +1894,8 @@ public class MainWindowViewModel : ReactiveObject
         public int ChannelNumber { get; }
 
         public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+
+        public IReadOnlyList<ChannelDeviceShapeOption> AvailableDeviceShapeOptions => ChannelDeviceShapeCatalog.All;
 
         public ObservableCollection<LedAddressSetting> LedAddressSettings { get; }
 
@@ -1504,6 +1911,7 @@ public class MainWindowViewModel : ReactiveObject
                 }
 
                 this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+                SelectedDeviceShapeOption = preset.DefaultShape;
                 if (!preset.IsCustom)
                 {
                     _channelName = preset.DefaultName;
@@ -1519,7 +1927,28 @@ public class MainWindowViewModel : ReactiveObject
             }
         }
 
+        public ChannelDeviceShapeOption SelectedDeviceShapeOption
+        {
+            get => _selectedDeviceShapeOption;
+            set
+            {
+                ChannelDeviceShapeOption shape = value ?? ChannelDeviceShapeCatalog.FindById(null);
+                if (ReferenceEquals(_selectedDeviceShapeOption, shape))
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);
+                this.RaisePropertyChanged(nameof(DeviceShapeKind));
+                this.RaisePropertyChanged(nameof(PreviewLayout));
+            }
+        }
+
         public bool IsCustomDevicePreset => SelectedDevicePresetOption.IsCustom;
+
+        public DeviceShapeKind DeviceShapeKind => SelectedDeviceShapeOption.ShapeKind;
+
+        public ChannelDeviceLayout PreviewLayout => ChannelDeviceLayoutFactory.Create(DeviceShapeKind, LedCount);
 
         public string ChannelName
         {
@@ -1546,6 +1975,7 @@ public class MainWindowViewModel : ReactiveObject
                 }
 
                 ResizeLedAddresses(normalizedValue);
+                this.RaisePropertyChanged(nameof(PreviewLayout));
             }
         }
 
@@ -1590,14 +2020,18 @@ public class MainWindowViewModel : ReactiveObject
         internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
         {
             ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+            this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);
             this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+            this.RaisePropertyChanged(nameof(DeviceShapeKind));
             this.RaiseAndSetIfChanged(ref _channelName, NormalizeChannelDeviceName(settings.Name, ChannelNumber));
             int normalizedLedCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
             this.RaiseAndSetIfChanged(ref _ledCount, normalizedLedCount);
             string normalizedText = normalizedLedCount.ToString(CultureInfo.InvariantCulture);
             this.RaiseAndSetIfChanged(ref _ledCountText, normalizedText);
             ResetLedAddresses(normalizedLedCount, settings.LedAddresses);
+            this.RaisePropertyChanged(nameof(PreviewLayout));
         }
 
         internal AppSettingsStore.ChannelSettings ToChannelSettings()
@@ -1605,6 +2039,7 @@ public class MainWindowViewModel : ReactiveObject
             return new AppSettingsStore.ChannelSettings
             {
                 DevicePresetId = SelectedDevicePresetOption.Id,
+                DeviceShapeId = SelectedDeviceShapeOption.Id,
                 Name = NormalizeChannelDeviceName(ChannelName, ChannelNumber),
                 LedCount = LedCount,
                 LedAddresses = LedAddressSettings.Select(static address => address.Address).ToList()
@@ -1778,32 +2213,74 @@ public class MainWindowViewModel : ReactiveObject
         }
     }
 
-    public sealed class DeviceChannelGroup
+    public sealed class DeviceChannelGroup : ReactiveObject
     {
-        public DeviceChannelGroup(string deviceIdentifier, string deviceName, IReadOnlyList<DeviceChannelEntry> channels)
+        private bool _isSelectedForCanvas;
+        private double _canvasLeft;
+        private double _canvasTop;
+
+        public DeviceChannelGroup(
+            string deviceIdentifier,
+            string controllerDeviceIdentifier,
+            string deviceName,
+            string sourceName,
+            IReadOnlyList<DeviceChannelEntry> channels,
+            bool isSelectedForCanvas = true,
+            double canvasLeft = 0.05,
+            double canvasTop = 0.05)
         {
             DeviceIdentifier = deviceIdentifier;
+            ControllerDeviceIdentifier = controllerDeviceIdentifier;
             DeviceName = deviceName;
+            SourceName = sourceName;
             Channels = new ObservableCollection<DeviceChannelEntry>(channels);
+            _isSelectedForCanvas = isSelectedForCanvas;
+            _canvasLeft = canvasLeft;
+            _canvasTop = canvasTop;
         }
 
         internal string DeviceIdentifier { get; }
 
+        internal string ControllerDeviceIdentifier { get; }
+
         public string DeviceName { get; }
 
+        public string SourceName { get; }
+
         public ObservableCollection<DeviceChannelEntry> Channels { get; }
+
+        public bool IsSelectedForCanvas
+        {
+            get => _isSelectedForCanvas;
+            set => this.RaiseAndSetIfChanged(ref _isSelectedForCanvas, value);
+        }
+
+        public double CanvasLeft
+        {
+            get => _canvasLeft;
+            set => this.RaiseAndSetIfChanged(ref _canvasLeft, value);
+        }
+
+        public double CanvasTop
+        {
+            get => _canvasTop;
+            set => this.RaiseAndSetIfChanged(ref _canvasTop, value);
+        }
 
         public int ChannelCount => Channels.Count;
 
         public int TotalLedCount => Channels.Sum(channel => channel.LedCount);
 
-        public string Summary => $"{ChannelCount} channels, {TotalLedCount} LEDs";
+        public string Summary => ChannelCount == 1
+            ? $"{SourceName}, {Channels[0].ChannelLabel}, {TotalLedCount} LEDs"
+            : $"{SourceName}, {ChannelCount} channels, {TotalLedCount} LEDs";
     }
 
     public sealed class DeviceChannelEntry : ReactiveObject
     {
         private readonly Action<DeviceChannelEntry> _onChannelSettingsChanged;
         private ChannelDevicePresetOption _selectedDevicePresetOption;
+        private ChannelDeviceShapeOption _selectedDeviceShapeOption;
         private string _channelName;
         private int _ledCount;
         private string _ledCountText;
@@ -1821,6 +2298,7 @@ public class MainWindowViewModel : ReactiveObject
             ChannelLabel = channelLabel;
             MaxLedCount = Math.Max(1, maxLedCount);
             _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _selectedDeviceShapeOption = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
             _ledCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
             _ledCountText = _ledCount.ToString(CultureInfo.InvariantCulture);
@@ -1834,6 +2312,8 @@ public class MainWindowViewModel : ReactiveObject
         internal int ChannelNumber { get; }
 
         public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+
+        public IReadOnlyList<ChannelDeviceShapeOption> AvailableDeviceShapeOptions => ChannelDeviceShapeCatalog.All;
 
         public ObservableCollection<LedAddressSetting> LedAddressSettings { get; }
 
@@ -1849,6 +2329,7 @@ public class MainWindowViewModel : ReactiveObject
                 }
 
                 this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+                SelectedDeviceShapeOption = preset.DefaultShape;
                 if (!preset.IsCustom)
                 {
                     this.RaiseAndSetIfChanged(ref _channelName, preset.DefaultName);
@@ -1866,7 +2347,29 @@ public class MainWindowViewModel : ReactiveObject
             }
         }
 
+        public ChannelDeviceShapeOption SelectedDeviceShapeOption
+        {
+            get => _selectedDeviceShapeOption;
+            set
+            {
+                ChannelDeviceShapeOption shape = value ?? ChannelDeviceShapeCatalog.FindById(null);
+                if (ReferenceEquals(_selectedDeviceShapeOption, shape))
+                {
+                    return;
+                }
+
+                this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);
+                this.RaisePropertyChanged(nameof(DeviceShapeKind));
+                this.RaisePropertyChanged(nameof(PreviewLayout));
+                _onChannelSettingsChanged(this);
+            }
+        }
+
         public bool IsCustomDevicePreset => SelectedDevicePresetOption.IsCustom;
+
+        public DeviceShapeKind DeviceShapeKind => SelectedDeviceShapeOption.ShapeKind;
+
+        public ChannelDeviceLayout PreviewLayout => ChannelDeviceLayoutFactory.Create(DeviceShapeKind, LedCount);
 
         public string ChannelName
         {
@@ -1905,6 +2408,7 @@ public class MainWindowViewModel : ReactiveObject
                 }
 
                 ResizeLedAddresses(normalizedValue);
+                this.RaisePropertyChanged(nameof(PreviewLayout));
                 _onChannelSettingsChanged(this);
             }
         }
@@ -1952,13 +2456,17 @@ public class MainWindowViewModel : ReactiveObject
         internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
         {
             ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
+            this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);
             this.RaisePropertyChanged(nameof(IsCustomDevicePreset));
+            this.RaisePropertyChanged(nameof(DeviceShapeKind));
             this.RaiseAndSetIfChanged(ref _channelName, NormalizeChannelDeviceName(settings.Name, ChannelNumber));
             int normalizedLedCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
             this.RaiseAndSetIfChanged(ref _ledCount, normalizedLedCount);
             this.RaiseAndSetIfChanged(ref _ledCountText, normalizedLedCount.ToString(CultureInfo.InvariantCulture));
             ResetLedAddresses(normalizedLedCount, settings.LedAddresses);
+            this.RaisePropertyChanged(nameof(PreviewLayout));
         }
 
         internal AppSettingsStore.ChannelSettings ToChannelSettings()
@@ -1966,6 +2474,7 @@ public class MainWindowViewModel : ReactiveObject
             return new AppSettingsStore.ChannelSettings
             {
                 DevicePresetId = SelectedDevicePresetOption.Id,
+                DeviceShapeId = SelectedDeviceShapeOption.Id,
                 Name = NormalizeChannelDeviceName(ChannelName, ChannelNumber),
                 LedCount = LedCount,
                 LedAddresses = LedAddressSettings.Select(static address => address.Address).ToList()
@@ -1990,6 +2499,31 @@ public class MainWindowViewModel : ReactiveObject
             ResetLedAddresses(ledCount, existingAddresses);
         }
     }
+
+    private sealed record CanvasBackgroundSampleState(Rect Bounds, int SampleIndex);
+
+    private sealed record CanvasDeviceLayoutState(
+        string DeviceIdentifier,
+        string ControllerDeviceIdentifier,
+        string DeviceName,
+        Rect Bounds,
+        IReadOnlyList<CanvasChannelLayoutState> Channels);
+
+    private sealed record CanvasChannelLayoutState(
+        DeviceChannelEntry Channel,
+        Rect Bounds);
+
+    private sealed record CanvasDeviceRenderState(
+        string DeviceIdentifier,
+        string ControllerDeviceIdentifier,
+        string DeviceName,
+        Rect Bounds,
+        IReadOnlyList<CanvasChannelRenderState> Channels);
+
+    private sealed record CanvasChannelRenderState(
+        DeviceChannelEntry Channel,
+        Rect Bounds,
+        IReadOnlyList<LedColor> LedColors);
 
     private sealed record DeviceDraftState(
         string ProfileName,

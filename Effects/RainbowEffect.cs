@@ -28,7 +28,12 @@ internal sealed class RainbowEffect : ILedEffect
 
         return EffectFrameFactory.CreateMappedFrame(
             context.LedCountsPerChannel,
-            (_, _, flatIndex) => ColorMath.FromHsv(baseHue + (flatIndex * spread), 1.0, 1.0),
+            (channelIndex, ledIndex, _) =>
+            {
+                EffectLedLocation location = context.GetLedLocation(channelIndex, ledIndex);
+                double hueOffset = location.AxisPosition * spread;
+                return ColorMath.FromHsv(baseHue + hueOffset, 1.0, 1.0);
+            },
             Math.Max(12, 70 - context.Speed / 2));
     }
 }

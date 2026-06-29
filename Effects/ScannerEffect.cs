@@ -28,28 +28,33 @@ internal sealed class ScannerEffect : ILedEffect
 
         return EffectFrameFactory.CreatePerChannelFrame(
             context.LedCountsPerChannel,
-            (_, ledCount) =>
+            (channelIndex, ledCount) =>
             {
                 if (ledCount == 0)
                 {
                     return [];
                 }
 
-                int cycle = Math.Max(1, (ledCount * 2) - 2);
-                int rawPosition = (int)((context.Tick * motionStep) % cycle);
-                int head = rawPosition < ledCount ? rawPosition : cycle - rawPosition;
+                double cycleLength = Math.Max(1, (ledCount * 2) - 2);
+                double rawPosition = (context.Tick * motionStep) % cycleLength;
+                double axisHead = rawPosition < ledCount
+                    ? rawPosition
+                    : cycleLength - rawPosition;
+                double normalizedTail = Math.Max(0.0001, tail);
 
                 LedColor[] leds = new LedColor[ledCount];
                 for (int ledIndex = 0; ledIndex < ledCount; ledIndex++)
                 {
-                    int distance = Math.Abs(head - ledIndex);
-                    if (distance >= tail)
+                    EffectLedLocation location = context.GetLedLocation(channelIndex, ledIndex);
+                    double axisPosition = location.AxisPosition;
+                    double distance = Math.Abs(axisHead - axisPosition);
+                    if (distance >= normalizedTail)
                     {
                         leds[ledIndex] = context.EffectiveBackgroundColor;
                         continue;
                     }
 
-                    double fade = 1.0 - (distance / (double)tail);
+                    double fade = 1.0 - (distance / normalizedTail);
                     leds[ledIndex] = context.BaseColor.Scale(Math.Max(0.08, fade));
                 }
 

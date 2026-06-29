@@ -30,9 +30,10 @@ internal sealed class WaveEffect : ILedEffect
 
         return EffectFrameFactory.CreateMappedFrame(
             context.LedCountsPerChannel,
-            (_, _, flatIndex) =>
+            (channelIndex, ledIndex, _) =>
             {
-                double phase = (context.Tick * phaseStep) + ((flatIndex / wavelength) * Math.PI);
+                EffectLedLocation location = context.GetLedLocation(channelIndex, ledIndex);
+                double phase = (context.Tick * phaseStep) + ((location.AxisPosition / wavelength) * Math.PI);
                 double wave = (Math.Sin(phase) + 1.0) / 2.0;
                 double intensity = (1.0 - contrast) + (wave * contrast);
                 return context.BaseColor.Scale(Math.Clamp(intensity, 0.1, 1.0));

@@ -50,7 +50,7 @@
                                                 <DataTemplate>
                                                     <Border BorderBrush="#223042" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
                                                         <StackPanel Spacing="8">
-                                                            <Grid ColumnDefinitions="Auto,280,220,120,Auto" ColumnSpacing="12">
+                                                            <Grid IsVisible="{Binding IsCustomDevicePreset}" ColumnDefinitions="Auto,260,160,220,120,Auto,Auto" ColumnSpacing="12">
                                                                 <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding ChannelLabel}" />
                                                                 <ComboBox Grid.Column="1"
                                                                           ItemsSource="{Binding AvailableDevicePresetOptions}"
@@ -61,36 +61,65 @@
                                                                         </DataTemplate>
                                                                     </ComboBox.ItemTemplate>
                                                                 </ComboBox>
-                                                                <TextBox Grid.Column="2"
-                                                                         Text="{Binding ChannelName, UpdateSourceTrigger=PropertyChanged}"
-                                                                         Watermark="Device name"
-                                                                         IsEnabled="{Binding IsCustomDevicePreset}" />
+                                                                <ComboBox Grid.Column="2"
+                                                                          ItemsSource="{Binding AvailableDeviceShapeOptions}"
+                                                                          SelectedItem="{Binding SelectedDeviceShapeOption}">
+                                                                    <ComboBox.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <TextBlock Text="{Binding DisplayName}" />
+                                                                        </DataTemplate>
+                                                                    </ComboBox.ItemTemplate>
+                                                                </ComboBox>
                                                                 <TextBox Grid.Column="3"
-                                                                         Text="{Binding LedCountText, UpdateSourceTrigger=PropertyChanged}"
-                                                                         IsEnabled="{Binding IsCustomDevicePreset}" />
-                                                                <TextBlock Grid.Column="4" VerticalAlignment="Center" Opacity="0.75" Text="{Binding MaxLedCount, StringFormat='Max {0}'}" />
+                                                                         Text="{Binding ChannelName, UpdateSourceTrigger=PropertyChanged}"
+                                                                         Watermark="Device name" />
+                                                                <TextBox Grid.Column="4"
+                                                                         Text="{Binding LedCountText, UpdateSourceTrigger=PropertyChanged}" />
+                                                                <TextBlock Grid.Column="5" VerticalAlignment="Center" Opacity="0.75" Text="{Binding MaxLedCount, StringFormat='Max {0}'}" />
+                                                                <Button Grid.Column="6" Content="Advanced">
+                                                                    <Button.Flyout>
+                                                                        <Flyout Placement="BottomEdgeAlignedLeft">
+                                                                            <Border MinWidth="320" MaxHeight="360" Padding="8">
+                                                                                <StackPanel Spacing="8">
+                                                                                    <TextBlock Opacity="0.75"
+                                                                                               Text="LED addresses for this channel. Defaults are filled sequentially from 0."
+                                                                                               TextWrapping="Wrap" />
+                                                                                    <ScrollViewer MaxHeight="280"
+                                                                                                  HorizontalScrollBarVisibility="Disabled"
+                                                                                                  VerticalScrollBarVisibility="Auto">
+                                                                                        <ItemsControl ItemsSource="{Binding LedAddressSettings}">
+                                                                                            <ItemsControl.ItemTemplate>
+                                                                                                <DataTemplate>
+                                                                                                    <Grid ColumnDefinitions="Auto,120" ColumnSpacing="12" Margin="0,0,0,4">
+                                                                                                        <TextBlock Grid.Column="0"
+                                                                                                                   VerticalAlignment="Center"
+                                                                                                                   Text="{Binding LedIndex, StringFormat='LED {0}'}" />
+                                                                                                        <TextBox Grid.Column="1"
+                                                                                                                 Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}" />
+                                                                                                    </Grid>
+                                                                                                </DataTemplate>
+                                                                                            </ItemsControl.ItemTemplate>
+                                                                                        </ItemsControl>
+                                                                                    </ScrollViewer>
+                                                                                </StackPanel>
+                                                                            </Border>
+                                                                        </Flyout>
+                                                                    </Button.Flyout>
+                                                                </Button>
                                                             </Grid>
 
-                                                            <Expander Header="Advanced">
-                                                                <StackPanel Spacing="8">
-                                                                    <TextBlock Opacity="0.75"
-                                                                               Text="LED addresses for this channel. Defaults are filled sequentially from 0."
-                                                                               TextWrapping="Wrap" />
-                                                                    <ItemsControl ItemsSource="{Binding LedAddressSettings}">
-                                                                        <ItemsControl.ItemTemplate>
-                                                                            <DataTemplate>
-                                                                                <Grid ColumnDefinitions="Auto,120" ColumnSpacing="12" Margin="0,0,0,4">
-                                                                                    <TextBlock Grid.Column="0"
-                                                                                               VerticalAlignment="Center"
-                                                                                               Text="{Binding LedIndex, StringFormat='LED {0}'}" />
-                                                                                    <TextBox Grid.Column="1"
-                                                                                             Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}" />
-                                                                                </Grid>
-                                                                            </DataTemplate>
-                                                                        </ItemsControl.ItemTemplate>
-                                                                    </ItemsControl>
-                                                                </StackPanel>
-                                                            </Expander>
+                                                            <Grid IsVisible="{Binding !IsCustomDevicePreset}" ColumnDefinitions="Auto,260,Auto" ColumnSpacing="12">
+                                                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding ChannelLabel}" />
+                                                                <ComboBox Grid.Column="1" Grid.ColumnSpan="6"
+                                                                          ItemsSource="{Binding AvailableDevicePresetOptions}"
+                                                                          SelectedItem="{Binding SelectedDevicePresetOption}">
+                                                                    <ComboBox.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <TextBlock Text="{Binding DisplayName}" />
+                                                                        </DataTemplate>
+                                                                    </ComboBox.ItemTemplate>
+                                                                </ComboBox>
+                                                            </Grid>
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>

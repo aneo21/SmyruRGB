@@ -9,6 +9,7 @@ internal static class ChannelDevicePresetCatalog
         "Custom",
         string.Empty,
         1,
+        ChannelDeviceShapeCatalog.BarShapeId,
         isCustom: true);
 
     private static readonly IReadOnlyList<ChannelDevicePresetOption> Presets =

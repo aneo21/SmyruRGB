@@ -110,6 +110,8 @@ internal sealed class AppSettingsStore
     {
         public string DevicePresetId { get; set; } = ChannelDevicePresetCatalog.CustomPresetId;
 
+        public string DeviceShapeId { get; set; } = ChannelDeviceShapeCatalog.BarShapeId;
+
         public string Name { get; set; } = string.Empty;
 
         public int LedCount { get; set; }

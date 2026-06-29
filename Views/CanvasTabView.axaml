@@ -1,70 +1,69 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:SmyruRGB.Views"
              x:Class="SmyruRGB.Views.CanvasTabView">
     <Grid Margin="16" RowDefinitions="Auto,*" RowSpacing="14">
         <StackPanel Spacing="6">
             <TextBlock FontSize="20" FontWeight="SemiBold" Text="Canvas" />
-            <TextBlock Opacity="0.75" Text="Workspace for future visual editing and previews." />
+            <TextBlock Opacity="0.75" Text="Live preview of effect geometry for selected channel device shapes." />
         </StackPanel>
 
         <Grid Grid.Row="1" ColumnDefinitions="2*,*" ColumnSpacing="16">
             <Border Grid.Column="0" Classes="section-card">
-                <Canvas Height="360"
-                        HorizontalAlignment="Stretch"
-                        Background="#111827"
-                        ClipToBounds="True">
-                    <Border Canvas.Left="28"
-                            Canvas.Top="28"
-                            Width="180"
-                            Height="96"
-                            Background="#1F2937"
-                            BorderBrush="#60A5FA"
-                            BorderThickness="1"
-                            CornerRadius="10" />
-
-                    <TextBlock Canvas.Left="44"
-                               Canvas.Top="62"
-                               FontSize="16"
-                               FontWeight="SemiBold"
-                               Foreground="#E5E7EB"
-                               Text="Canvas area" />
-
-                    <TextBlock Canvas.Left="44"
-                               Canvas.Top="88"
-                               Opacity="0.8"
-                               Foreground="#E5E7EB"
-                               Text="Ready for custom controls." />
-                </Canvas>
+                <views:CanvasScenePreviewControl Scene="{Binding CanvasPreviewScene}"
+                                                 MoveDeviceCommand="{Binding MoveCanvasDeviceCommand}"
+                                                 MinHeight="520" />
             </Border>
 
             <Border Grid.Column="1" Classes="section-card">
                 <StackPanel Spacing="10">
-                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="LED devices" />
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" FontSize="16" FontWeight="SemiBold" Text="LED devices" />
+                        <Button Grid.Column="1"
+                                Content="Select all"
+                                Command="{Binding SelectAllCanvasDevicesCommand}" />
+                        <Button Grid.Column="2"
+                                Content="Clear"
+                                Command="{Binding ClearCanvasDeviceSelectionCommand}" />
+                    </Grid>
                     <TextBlock Opacity="0.75"
-                               Text="Detected LED devices and their channel layout."
+                               Text="One shared canvas drives the preview. Each channel device is listed separately, can be enabled separately, and can be dragged independently."
                                TextWrapping="Wrap" />
 
                     <ScrollViewer MaxHeight="360"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding AllDeviceChannelGroups}">
+                        <ItemsControl ItemsSource="{Binding CanvasDeviceChannelGroups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Classes="section-card" Margin="0,0,0,8">
                                         <StackPanel Spacing="8">
-                                            <TextBlock FontWeight="SemiBold" Text="{Binding DeviceName}" />
-                                            <TextBlock Opacity="0.75" Text="{Binding Summary}" />
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                                <CheckBox Grid.Column="0"
+                                                          VerticalAlignment="Top"
+                                                          IsChecked="{Binding IsSelectedForCanvas}" />
+                                                <StackPanel Grid.Column="1" Spacing="4">
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DeviceName}" />
+                                                    <TextBlock Opacity="0.75" Text="{Binding Summary}" />
+                                                </StackPanel>
+                                            </Grid>
 
                                             <ItemsControl ItemsSource="{Binding Channels}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
                                                             <TextBlock Grid.Column="0"
                                                                        Text="{Binding ChannelName}"
                                                                        TextTrimming="CharacterEllipsis" />
                                                             <TextBlock Grid.Column="1"
                                                                        Opacity="0.75"
+                                                                       Text="{Binding SelectedDeviceShapeOption.DisplayName}" />
+                                                            <TextBlock Grid.Column="2"
+                                                                       Opacity="0.75"
                                                                        Text="{Binding LedCount, StringFormat='{}{0} LEDs'}" />
+                                                            <TextBlock Grid.Column="3"
+                                                                       Opacity="0.65"
+                                                                       Text="sampled" />
                                                         </Grid>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
