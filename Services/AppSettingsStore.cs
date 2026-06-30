@@ -66,6 +66,16 @@ internal sealed class AppSettingsStore
         public bool StartMinimizedEnabled { get; set; }
 
         public bool StartWithWindowsEnabled { get; set; }
+
+        public double? WindowX { get; set; }
+
+        public double? WindowY { get; set; }
+
+        public double? WindowWidth { get; set; }
+
+        public double? WindowHeight { get; set; }
+
+        public string? WindowState { get; set; }
     }
 
     internal sealed class DeviceSettings

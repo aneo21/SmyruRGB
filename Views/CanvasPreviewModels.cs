@@ -58,7 +58,8 @@ public sealed class CanvasPreviewChannelSnapshot
         string shapeName,
         ChannelDeviceLayout layout,
         Rect bounds,
-        IReadOnlyList<Color> ledColors)
+        IReadOnlyList<Color> ledColors,
+        KeyboardTemplate? keyboardLayout = null)
     {
         ChannelLabel = channelLabel;
         ChannelName = channelName;
@@ -66,6 +67,7 @@ public sealed class CanvasPreviewChannelSnapshot
         Layout = layout;
         Bounds = bounds;
         LedColors = ledColors;
+        KeyboardLayout = keyboardLayout;
     }
 
     public string ChannelLabel { get; }
@@ -81,6 +83,11 @@ public sealed class CanvasPreviewChannelSnapshot
     public IReadOnlyList<Color> LedColors { get; }
 
     public int LedCount => LedColors.Count;
+
+    /// <summary>
+    /// Opcjonalny template klawiatury. Jeśli nie null, będzie użyty do renderowania zamiast auto-grid.
+    /// </summary>
+    public KeyboardTemplate? KeyboardLayout { get; }
 }
 
 public readonly record struct CanvasDeviceMoveRequest(string DeviceIdentifier, double Left, double Top);

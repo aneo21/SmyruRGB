@@ -174,7 +174,7 @@ internal sealed class AsusAuraUsbMainboardDriver : IHidRgbControllerDriver
 
                     if (channel.Kind == ChannelKind.Fixed)
                     {
-                        SendMainboardColor(frame);
+                        SendMainboardColor(channel, frame);
                     }
                     else
                     {
@@ -333,9 +333,11 @@ internal sealed class AsusAuraUsbMainboardDriver : IHidRgbControllerDriver
             }
         }
 
-        private void SendMainboardColor(IReadOnlyList<LedColor> frame)
+        private void SendMainboardColor(ChannelInfo channel, IReadOnlyList<LedColor> frame)
         {
-            ushort mask = GetMask(0, frame.Count);
+            int nativeLedCount = channel.NativeLedCount > 0 ? channel.NativeLedCount : frame.Count;
+            int activeLedCount = Math.Min(nativeLedCount, frame.Count);
+            ushort mask = GetMask(channel.HeaderCount, activeLedCount);
             byte[] packet = new byte[65];
             packet[0] = PacketHeader;
             packet[1] = MainboardEffectColorCommand;
@@ -343,7 +345,7 @@ internal sealed class AsusAuraUsbMainboardDriver : IHidRgbControllerDriver
             packet[3] = (byte)(mask & 0xFF);
             packet[4] = 0x00;
 
-            for (int ledIndex = 0; ledIndex < frame.Count; ledIndex++)
+            for (int ledIndex = 0; ledIndex < activeLedCount; ledIndex++)
             {
                 int packetOffset = 5 + (ledIndex * 3);
                 LedColor color = frame[ledIndex];

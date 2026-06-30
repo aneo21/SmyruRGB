@@ -146,13 +146,13 @@ public sealed class CanvasScenePreviewControl : Control
         Rect deviceBounds = Project(canvasBounds, device.Bounds);
         context.DrawRectangle(DeviceBrush, isSelected ? SelectedOutlinePen : DeviceOutlinePen, deviceBounds, 14);
 
-        double headerHeight = Math.Min(deviceBounds.Height * 0.17, 28);
-        Rect headerBounds = new(deviceBounds.X, deviceBounds.Y, deviceBounds.Width, headerHeight);
+        Rect headerBounds = new(deviceBounds.X, deviceBounds.Y, deviceBounds.Width, 26);
         context.DrawRectangle(HeaderBrush, null, headerBounds, 14);
-        DrawLabel(context, device.DeviceName, 14, LabelBrush, new Point(headerBounds.X + 10, headerBounds.Y + 6));
+        DrawLabel(context, device.DeviceName, 14, LabelBrush, new Point(headerBounds.X + 6, headerBounds.Y + 1));
 
         foreach (CanvasPreviewChannelSnapshot channel in device.Channels)
         {
+            DrawLabel(context, channel.ChannelLabel, 11, LabelBrush, new Point(headerBounds.X + deviceBounds.Width/2, headerBounds.Y + 4));
             DrawChannel(context, canvasBounds, channel);
         }
     }
@@ -161,7 +161,6 @@ public sealed class CanvasScenePreviewControl : Control
     {
         Rect channelBounds = Project(canvasBounds, channel.Bounds);
         context.DrawRectangle(null, DeviceOutlinePen, channelBounds, 10);
-        DrawLabel(context, channel.ChannelLabel, 11, SecondaryLabelBrush, new Point(channelBounds.X + 8, channelBounds.Y + 6));
 
         Rect shapeBounds = new(
             channelBounds.X + 10,
@@ -198,6 +197,72 @@ public sealed class CanvasScenePreviewControl : Control
     }
 
     private static void DrawKeyboard(DrawingContext context, Rect bounds, CanvasPreviewChannelSnapshot preview)
+    {
+        // Jeśli jest template, użyj go; w przeciwnym razie fallback do auto-grid
+        if (preview.KeyboardLayout is not null)
+        {
+            DrawKeyboardWithTemplate(context, bounds, preview);
+        }
+        else
+        {
+            DrawKeyboardAuto(context, bounds, preview);
+        }
+    }
+
+    private static void DrawKeyboardWithTemplate(DrawingContext context, Rect bounds, CanvasPreviewChannelSnapshot preview)
+    {
+        KeyboardTemplate template = preview.KeyboardLayout!;
+        IReadOnlyList<Color> ledColors = preview.LedColors;
+
+        // Oblicz wysokość pojedynczego paska
+        double stripHeight = bounds.Height / template.Strips.Count;
+        double maxKeysInStrip = template.MaxKeysInStrip;
+
+        for (int stripIdx = 0; stripIdx < template.Strips.Count; stripIdx++)
+        {
+            KeyboardStrip strip = template.Strips[stripIdx];
+            double stripTop = bounds.Y + (stripIdx * stripHeight);
+            Rect stripBounds = new(bounds.X, stripTop, bounds.Width, stripHeight);
+
+            // Oblicz średnią szerokość klawisza (uwzględniając skalowanie)
+            double totalWidth = strip.Keys.Sum(k => k.Width);
+            double baseKeyWidth = stripBounds.Width / totalWidth;
+
+            double currentX = stripBounds.X;
+
+            foreach (KeyboardKey key in strip.Keys)
+            {
+                double keyWidth = baseKeyWidth * key.Width;
+                double keyHeight = stripHeight * key.Height;
+                // Row-spanning keys (e.g. numpad + / Enter) should start at the current row
+                // and extend downward into subsequent rows.
+                double keyTop = stripTop;
+                double maxAllowedHeight = Math.Max(0, bounds.Bottom - keyTop);
+                if (keyHeight > maxAllowedHeight)
+                {
+                    keyHeight = maxAllowedHeight;
+                }
+
+                Rect keyRect = new(currentX, keyTop, keyWidth, keyHeight);
+
+                // Jeśli to LED (nie puste miejsce), renderuj go
+                if (key.LedIndex.HasValue)
+                {
+                    int ledIndex = key.LedIndex.Value - 1; // Konwersja z 1-based na 0-based
+                    if (ledIndex >= 0 && ledIndex < ledColors.Count)
+                    {
+                        Color ledColor = ledColors[ledIndex];
+                        double cornerRadius = Math.Min(keyWidth, keyHeight) * 0.15;
+                        context.DrawRectangle(new SolidColorBrush(ledColor), DeviceOutlinePen, keyRect, cornerRadius);
+                    }
+                }
+
+                currentX += keyWidth;
+            }
+        }
+    }
+
+    private static void DrawKeyboardAuto(DrawingContext context, Rect bounds, CanvasPreviewChannelSnapshot preview)
     {
         int columns = Math.Max(1, preview.Layout.Columns);
         int rows = Math.Max(1, preview.Layout.Rows);

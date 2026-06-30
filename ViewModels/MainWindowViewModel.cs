@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -40,6 +41,8 @@ public class MainWindowViewModel : ReactiveObject
     private bool _isControllerDetailsVisible;
     private string _baseColorHex = "FF0000";
     private string _backgroundColorHex = "000000";
+
+    public string AppVersion { get; } = GetAppVersion();
 
     public MainWindowViewModel()
     {
@@ -84,6 +87,20 @@ public class MainWindowViewModel : ReactiveObject
         RefreshConnection(true);
         RefreshCanvasPreview();
         _canvasPreviewTimer.Start();
+    }
+
+    private static string GetAppVersion()
+    {
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        string? informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            return informationalVersion;
+        }
+
+        Version? version = assembly.GetName().Version;
+        return version is null ? "unknown" : version.ToString(3);
     }
 
     private int _r = 255;
@@ -793,7 +810,7 @@ public class MainWindowViewModel : ReactiveObject
             new LedColor((byte)BackgroundR, (byte)BackgroundG, (byte)BackgroundB),
             EffectSpeed,
             ChannelLedSettings.Select(setting => setting.LedCount).ToArray(),
-            ChannelLedSettings.Select(setting => CreateEffectLedLocations(setting.PreviewLayout)).ToArray(),
+            ChannelLedSettings.Select(setting => CreateEffectLedLocations(setting.PreviewLayout, setting.SelectedDevicePresetOption.KeyboardLayout)).ToArray(),
             ChannelLedSettings.Select(setting => setting.ChannelName).ToArray(),
             ChannelLedSettings.Count,
             tick,
@@ -808,15 +825,43 @@ public class MainWindowViewModel : ReactiveObject
             new LedColor((byte)BackgroundR, (byte)BackgroundG, (byte)BackgroundB),
             EffectSpeed,
             channels.Select(channel => channel.LedCount).ToArray(),
-            channels.Select(channel => CreateEffectLedLocations(channel.PreviewLayout)).ToArray(),
+            channels.Select(channel => CreateEffectLedLocations(channel.PreviewLayout, channel.SelectedDevicePresetOption.KeyboardLayout)).ToArray(),
             channels.Select(channel => NormalizeChannelDeviceName(channel.ChannelName, channel.ChannelNumber)).ToArray(),
             channels.Count,
             tick,
             EffectParameters.ToDictionary(parameter => parameter.Key, parameter => parameter.Value, StringComparer.Ordinal));
     }
 
-    private static IReadOnlyList<EffectLedLocation> CreateEffectLedLocations(ChannelDeviceLayout layout)
+    private static IReadOnlyList<EffectLedLocation> CreateEffectLedLocations(ChannelDeviceLayout layout, KeyboardTemplate? keyboardLayout = null)
     {
+        if (layout.ShapeKind == DeviceShapeKind.Keyboard && keyboardLayout is not null)
+        {
+            Dictionary<int, (double X, double Y, double Sequence)> templateLocations = BuildKeyboardTemplateLocations(keyboardLayout);
+            return layout.Leds
+                .Select(led =>
+                {
+                    if (templateLocations.TryGetValue(led.LedIndex, out (double X, double Y, double Sequence) mapped))
+                    {
+                        return new EffectLedLocation(
+                            led.LedIndex,
+                            mapped.X,
+                            mapped.Y,
+                            mapped.Sequence,
+                            Math.Sqrt(Math.Pow(mapped.X - 0.5, 2) + Math.Pow(mapped.Y - 0.5, 2)),
+                            0);
+                    }
+
+                    return new EffectLedLocation(
+                        led.LedIndex,
+                        led.X,
+                        led.Y,
+                        led.LedIndex,
+                        Math.Sqrt(Math.Pow(led.X - 0.5, 2) + Math.Pow(led.Y - 0.5, 2)),
+                        0);
+                })
+                .ToArray();
+        }
+
         return layout.Leds
             .Select(led => new EffectLedLocation(
                 led.LedIndex,
@@ -826,6 +871,37 @@ public class MainWindowViewModel : ReactiveObject
                 Math.Sqrt(Math.Pow(led.X - 0.5, 2) + Math.Pow(led.Y - 0.5, 2)),
                 NormalizeAngle(led.StartAngleDegrees + (led.SweepAngleDegrees / 2.0))))
             .ToArray();
+    }
+
+    private static Dictionary<int, (double X, double Y, double Sequence)> BuildKeyboardTemplateLocations(KeyboardTemplate keyboardTemplate)
+    {
+        var locations = new Dictionary<int, (double X, double Y, double Sequence)>();
+        int stripCount = Math.Max(1, keyboardTemplate.Strips.Count);
+        int sequenceIndex = 0;
+
+        for (int stripIndex = 0; stripIndex < keyboardTemplate.Strips.Count; stripIndex++)
+        {
+            KeyboardStrip strip = keyboardTemplate.Strips[stripIndex];
+            double totalWidth = Math.Max(0.001, strip.Keys.Sum(key => key.Width));
+            double currentX = 0;
+            double y = (stripIndex + 0.5) / stripCount;
+
+            foreach (KeyboardKey key in strip.Keys)
+            {
+                double keyWidth = Math.Max(0.001, key.Width);
+                if (key.LedIndex.HasValue)
+                {
+                    int ledIndex = key.LedIndex.Value - 1;
+                    double x = (currentX + (keyWidth / 2.0)) / totalWidth;
+                    locations[ledIndex] = (x, y, sequenceIndex);
+                    sequenceIndex++;
+                }
+
+                currentX += keyWidth;
+            }
+        }
+
+        return locations;
     }
 
     private static double GetAxisPosition(DeviceShapeKind shapeKind, ChannelDeviceLedLayout led)
@@ -859,6 +935,7 @@ public class MainWindowViewModel : ReactiveObject
         IReadOnlyList<CanvasDeviceRenderState> renderedDevices = CreateCanvasRenderStates(includeSelectedOnly: false, tick, out delayMilliseconds);
         List<SmyruRgbHidClient.DeviceFrameRequest> requests = [];
         message = string.Empty;
+        int? roccatDelayOverride = null;
 
         foreach (IGrouping<string, CanvasDeviceRenderState> controllerGroup in renderedDevices.GroupBy(device => device.ControllerDeviceIdentifier, StringComparer.Ordinal))
         {
@@ -867,10 +944,38 @@ public class MainWindowViewModel : ReactiveObject
                 .OrderBy(channel => channel.Channel.ChannelNumber)
                 .ToList();
 
+            if (ChannelDevicePresetCatalog.IsRoccatDevice(controllerGroup.Key))
+            {
+                List<DeviceChannelEntry> rocctChannels = channels.Select(channel => channel.Channel).ToList();
+                EffectContext roccatContext = CreateEffectContext(rocctChannels, tick);
+                EffectFrame roccatFrame = effect.CreateFrame(roccatContext);
+                if (roccatFrame.ChannelLeds.Count != rocctChannels.Count)
+                {
+                    deviceRequests = [];
+                    message = $"Effect '{effect.Name}' returned {roccatFrame.ChannelLeds.Count} channels for Roccat, expected {rocctChannels.Count}.";
+                    return false;
+                }
+
+                requests.Add(new SmyruRgbHidClient.DeviceFrameRequest(
+                    controllerGroup.Key,
+                    roccatFrame.ChannelLeds.Select(channel => (IReadOnlyList<LedColor>)channel.ToArray()).ToArray(),
+                    rocctChannels.Select(channel => channel.LedCount).ToArray()));
+
+                roccatDelayOverride = roccatDelayOverride.HasValue
+                    ? Math.Min(roccatDelayOverride.Value, roccatFrame.DelayMilliseconds)
+                    : roccatFrame.DelayMilliseconds;
+                continue;
+            }
+
             requests.Add(new SmyruRgbHidClient.DeviceFrameRequest(
                 controllerGroup.Key,
                 channels.Select(channel => (IReadOnlyList<LedColor>)channel.LedColors).ToArray(),
                 channels.Select(channel => channel.Channel.LedCount).ToArray()));
+        }
+
+        if (roccatDelayOverride.HasValue)
+        {
+            delayMilliseconds = Math.Min(delayMilliseconds, roccatDelayOverride.Value);
         }
 
         if (requests.Count == 0)
@@ -916,7 +1021,8 @@ public class MainWindowViewModel : ReactiveObject
                     GetShapeDisplayName(channel.Channel.DeviceShapeKind),
                     channel.Channel.PreviewLayout,
                     channel.Bounds,
-                    channel.LedColors.Select(static color => Color.FromRgb(color.Red, color.Green, color.Blue)).ToArray()))
+                    channel.LedColors.Select(static color => Color.FromRgb(color.Red, color.Green, color.Blue)).ToArray(),
+                    channel.Channel.SelectedDevicePresetOption.KeyboardLayout))
                     .ToArray()))
                 .ToArray());
     }
@@ -1164,9 +1270,10 @@ public class MainWindowViewModel : ReactiveObject
                 channelIndex < existingSettings.Length ? existingSettings[channelIndex] : null,
                 channel.ChannelNumber,
                 channel.DefaultLedCount,
-                channel.MaxLedCount);
+                channel.MaxLedCount,
+                _currentDeviceIdentifier);
 
-            ChannelLedSetting setting = new(channel.ChannelNumber, initialSettings, channel.MaxLedCount);
+            ChannelLedSetting setting = new(channel.ChannelNumber, initialSettings, channel.MaxLedCount, _currentDeviceIdentifier);
             setting.PropertyChanged += OnChannelLedSettingChanged;
             ChannelLedSettings.Add(setting);
         }
@@ -1423,7 +1530,8 @@ public class MainWindowViewModel : ReactiveObject
                 savedChannel,
                 setting.ChannelNumber,
                 defaultLedCount,
-                setting.MaxLedCount);
+                setting.MaxLedCount,
+                _currentDeviceIdentifier);
 
             setting.ApplyChannelSettings(normalizedSettings);
         }
@@ -1569,7 +1677,8 @@ public class MainWindowViewModel : ReactiveObject
                 savedChannel,
                 ChannelLedSettings[channelIndex].ChannelNumber,
                 defaultLedCount,
-                ChannelLedSettings[channelIndex].MaxLedCount));
+                ChannelLedSettings[channelIndex].MaxLedCount,
+                _currentDeviceIdentifier));
         }
 
         RebuildAllDeviceChannelGroups();
@@ -1696,7 +1805,8 @@ public class MainWindowViewModel : ReactiveObject
                 baseSettings,
                 channel.ChannelNumber,
                 channel.DefaultLedCount,
-                channel.MaxLedCount);
+                channel.MaxLedCount,
+                controller.DeviceIdentifier);
 
             return new DeviceChannelEntry(
                 controller.DeviceIdentifier,
@@ -1714,7 +1824,8 @@ public class MainWindowViewModel : ReactiveObject
             entry.ToChannelSettings(),
             entry.ChannelNumber,
             entry.LedCount,
-            entry.MaxLedCount);
+            entry.MaxLedCount,
+            entry.DeviceIdentifier);
         entry.ApplyChannelSettings(normalizedSettings);
 
         if (!string.IsNullOrWhiteSpace(_currentDeviceIdentifier)
@@ -1750,16 +1861,20 @@ public class MainWindowViewModel : ReactiveObject
         AppSettingsStore.ChannelSettings? source,
         int channelNumber,
         int defaultLedCount,
-        int maxLedCount)
+        int maxLedCount,
+        string? deviceIdentifier)
     {
-        ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(source?.DevicePresetId);
+        ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.NormalizeForDevice(source?.DevicePresetId, deviceIdentifier);
         ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(
             string.IsNullOrWhiteSpace(source?.DeviceShapeId)
                 ? preset.DefaultShapeId
                 : source!.DeviceShapeId);
+        bool isRoccatDevice = ChannelDevicePresetCatalog.IsRoccatDevice(deviceIdentifier);
         int ledCount = preset.IsCustom
             ? Math.Clamp(source?.LedCount ?? defaultLedCount, 1, maxLedCount)
-            : Math.Clamp(preset.DefaultLedCount, 1, maxLedCount);
+            : isRoccatDevice
+                ? Math.Clamp(maxLedCount, 1, maxLedCount)
+                : Math.Clamp(preset.DefaultLedCount, 1, maxLedCount);
 
         string channelName = preset.IsCustom
             ? NormalizeChannelDeviceName(source?.Name, channelNumber)
@@ -1871,6 +1986,7 @@ public class MainWindowViewModel : ReactiveObject
 
     public sealed class ChannelLedSetting : ReactiveObject
     {
+        private readonly string? _deviceIdentifier;
         private ChannelDevicePresetOption _selectedDevicePresetOption;
         private ChannelDeviceShapeOption _selectedDeviceShapeOption;
         private string _channelName;
@@ -1878,11 +1994,12 @@ public class MainWindowViewModel : ReactiveObject
         private string _ledCountText;
         private int _maxLedCount;
 
-        internal ChannelLedSetting(int channelNumber, AppSettingsStore.ChannelSettings settings, int maxLedCount)
+        internal ChannelLedSetting(int channelNumber, AppSettingsStore.ChannelSettings settings, int maxLedCount, string? deviceIdentifier)
         {
             ChannelNumber = channelNumber;
+            _deviceIdentifier = deviceIdentifier;
             _maxLedCount = Math.Max(1, maxLedCount);
-            _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _selectedDevicePresetOption = ChannelDevicePresetCatalog.NormalizeForDevice(settings.DevicePresetId, _deviceIdentifier);
             _selectedDeviceShapeOption = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
             _ledCount = Math.Clamp(settings.LedCount, 1, _maxLedCount);
@@ -1893,7 +2010,9 @@ public class MainWindowViewModel : ReactiveObject
 
         public int ChannelNumber { get; }
 
-        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.GetAvailableForDevice(_deviceIdentifier);
+
+        public bool IsRoccatDevice => ChannelDevicePresetCatalog.IsRoccatDevice(_deviceIdentifier);
 
         public IReadOnlyList<ChannelDeviceShapeOption> AvailableDeviceShapeOptions => ChannelDeviceShapeCatalog.All;
 
@@ -1904,7 +2023,7 @@ public class MainWindowViewModel : ReactiveObject
             get => _selectedDevicePresetOption;
             set
             {
-                ChannelDevicePresetOption preset = value ?? ChannelDevicePresetCatalog.FindById(null);
+                ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.NormalizeForDevice(value?.Id, _deviceIdentifier);
                 if (ReferenceEquals(_selectedDevicePresetOption, preset))
                 {
                     return;
@@ -2019,7 +2138,7 @@ public class MainWindowViewModel : ReactiveObject
 
         internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
         {
-            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.NormalizeForDevice(settings.DevicePresetId, _deviceIdentifier);
             ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
             this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);
@@ -2279,6 +2398,7 @@ public class MainWindowViewModel : ReactiveObject
     public sealed class DeviceChannelEntry : ReactiveObject
     {
         private readonly Action<DeviceChannelEntry> _onChannelSettingsChanged;
+        private readonly string? _deviceIdentifier;
         private ChannelDevicePresetOption _selectedDevicePresetOption;
         private ChannelDeviceShapeOption _selectedDeviceShapeOption;
         private string _channelName;
@@ -2294,10 +2414,11 @@ public class MainWindowViewModel : ReactiveObject
             Action<DeviceChannelEntry> onChannelSettingsChanged)
         {
             DeviceIdentifier = deviceIdentifier;
+            _deviceIdentifier = deviceIdentifier;
             ChannelNumber = channelNumber;
             ChannelLabel = channelLabel;
             MaxLedCount = Math.Max(1, maxLedCount);
-            _selectedDevicePresetOption = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            _selectedDevicePresetOption = ChannelDevicePresetCatalog.NormalizeForDevice(settings.DevicePresetId, _deviceIdentifier);
             _selectedDeviceShapeOption = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             _channelName = NormalizeChannelDeviceName(settings.Name, channelNumber);
             _ledCount = Math.Clamp(settings.LedCount, 1, MaxLedCount);
@@ -2311,7 +2432,9 @@ public class MainWindowViewModel : ReactiveObject
 
         internal int ChannelNumber { get; }
 
-        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.All;
+        public IReadOnlyList<ChannelDevicePresetOption> AvailableDevicePresetOptions => ChannelDevicePresetCatalog.GetAvailableForDevice(_deviceIdentifier);
+
+        public bool IsRoccatDevice => ChannelDevicePresetCatalog.IsRoccatDevice(_deviceIdentifier);
 
         public IReadOnlyList<ChannelDeviceShapeOption> AvailableDeviceShapeOptions => ChannelDeviceShapeCatalog.All;
 
@@ -2322,7 +2445,7 @@ public class MainWindowViewModel : ReactiveObject
             get => _selectedDevicePresetOption;
             set
             {
-                ChannelDevicePresetOption preset = value ?? ChannelDevicePresetCatalog.FindById(null);
+                ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.NormalizeForDevice(value?.Id, _deviceIdentifier);
                 if (ReferenceEquals(_selectedDevicePresetOption, preset))
                 {
                     return;
@@ -2455,7 +2578,7 @@ public class MainWindowViewModel : ReactiveObject
 
         internal void ApplyChannelSettings(AppSettingsStore.ChannelSettings settings)
         {
-            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.FindById(settings.DevicePresetId);
+            ChannelDevicePresetOption preset = ChannelDevicePresetCatalog.NormalizeForDevice(settings.DevicePresetId, _deviceIdentifier);
             ChannelDeviceShapeOption shape = ChannelDeviceShapeCatalog.FindById(settings.DeviceShapeId);
             this.RaiseAndSetIfChanged(ref _selectedDevicePresetOption, preset);
             this.RaiseAndSetIfChanged(ref _selectedDeviceShapeOption, shape);

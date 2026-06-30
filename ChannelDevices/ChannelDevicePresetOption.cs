@@ -8,7 +8,8 @@ public sealed class ChannelDevicePresetOption
         string defaultName,
         int defaultLedCount,
         string defaultShapeId,
-        bool isCustom = false)
+        bool isCustom = false,
+        KeyboardTemplate? keyboardLayout = null)
     {
         Id = id;
         DisplayName = displayName;
@@ -16,6 +17,7 @@ public sealed class ChannelDevicePresetOption
         DefaultLedCount = defaultLedCount;
         DefaultShapeId = defaultShapeId;
         IsCustom = isCustom;
+        KeyboardLayout = keyboardLayout;
     }
 
     public string Id { get; }
@@ -33,4 +35,9 @@ public sealed class ChannelDevicePresetOption
     public ChannelDeviceLayout CreateLayout(int ledCount) => ChannelDeviceLayoutFactory.Create(DefaultShape.ShapeKind, ledCount);
 
     public bool IsCustom { get; }
+
+    /// <summary>
+    /// Opcjonalny template klawiatury. Jeśli nie null, będzie użyty do renderowania zamiast auto-grid.
+    /// </summary>
+    public KeyboardTemplate? KeyboardLayout { get; }
 }

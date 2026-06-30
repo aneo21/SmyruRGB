@@ -14,9 +14,16 @@ public partial class App : Application
 
     private MainWindow? _mainWindow;
     private MainWindowViewModel? _mainWindowViewModel;
+    private readonly AppSettingsStore _settingsStore = new();
     private TrayIcon? _trayIcon;
     private bool _isExitRequested;
+    private bool _isApplyingSavedWindowPlacement;
     private bool _startupWindowStateApplied;
+    private bool _startupVisibilityApplied;
+    private bool _initialPlacementApplied;
+    private PixelPoint? _pendingWindowPosition;
+    private WindowState? _pendingWindowState;
+    private WindowState _lastVisibleWindowState = WindowState.Normal;
 
     public override void Initialize()
     {
@@ -33,6 +40,8 @@ public partial class App : Application
                 DataContext = _mainWindowViewModel,
                 Icon = CreateAppWindowIcon()
             };
+
+            ApplySavedWindowPlacement();
 
             desktop.MainWindow = _mainWindow;
             InitializeTrayIcon();
@@ -78,8 +87,15 @@ public partial class App : Application
         }
 
         _mainWindow.PropertyChanged += OnMainWindowPropertyChanged;
+        _mainWindow.Opened += OnMainWindowOpenedApplyPlacement;
+        _mainWindow.Opened += OnMainWindowOpenedEnsureVisible;
+        _mainWindow.PositionChanged += (_, _) => SaveWindowPlacement();
         _mainWindow.Closing += OnMainWindowClosing;
-        _mainWindow.Closed += (_, _) => _trayIcon?.Dispose();
+        _mainWindow.Closed += (_, _) =>
+        {
+            SaveWindowPlacement();
+            _trayIcon?.Dispose();
+        };
     }
 
     private void ApplyStartupWindowBehavior()
@@ -117,17 +133,107 @@ public partial class App : Application
         }, DispatcherPriority.Background);
     }
 
-    private void OnMainWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+    private void OnMainWindowOpenedApplyPlacement(object? sender, EventArgs e)
     {
-        if (change.Property != Window.WindowStateProperty
-            || _mainWindow is null
-            || _mainWindowViewModel?.MinimizeToTrayEnabled != true
-            || _mainWindow.WindowState != WindowState.Minimized)
+        if (_initialPlacementApplied || _mainWindow is null)
         {
             return;
         }
 
-        MinimizeMainWindowToTray();
+        _initialPlacementApplied = true;
+        PixelPoint? position = _pendingWindowPosition;
+        WindowState? state = _pendingWindowState;
+        _pendingWindowPosition = null;
+        _pendingWindowState = null;
+
+        // On some platforms initial startup placement is resolved after Opened,
+        // so apply saved coordinates on the next UI cycle.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_mainWindow is null)
+            {
+                return;
+            }
+
+            _isApplyingSavedWindowPlacement = true;
+            try
+            {
+                if (position.HasValue)
+                {
+                    _mainWindow.Position = position.Value;
+                }
+
+                if (state.HasValue && state.Value != WindowState.Normal)
+                {
+                    _mainWindow.WindowState = state.Value;
+                }
+            }
+            finally
+            {
+                _isApplyingSavedWindowPlacement = false;
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnMainWindowOpenedEnsureVisible(object? sender, EventArgs e)
+    {
+        if (_startupVisibilityApplied || _mainWindow is null || _mainWindowViewModel?.StartMinimizedEnabled == true)
+        {
+            return;
+        }
+
+        _startupVisibilityApplied = true;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_mainWindow is null)
+            {
+                return;
+            }
+
+            if (_mainWindow.WindowState == WindowState.Minimized)
+            {
+                _mainWindow.WindowState = WindowState.Normal;
+            }
+
+            _mainWindow.Show();
+            _mainWindow.Activate();
+
+            if (_trayIcon is not null)
+            {
+                _trayIcon.IsVisible = false;
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnMainWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+    {
+        if (_mainWindow is null)
+        {
+            return;
+        }
+
+        if (change.Property == Window.WindowStateProperty)
+        {
+            if (_mainWindow.WindowState != WindowState.Minimized)
+            {
+                _lastVisibleWindowState = _mainWindow.WindowState;
+                SaveWindowPlacement();
+            }
+
+            if (_mainWindowViewModel?.MinimizeToTrayEnabled == true
+                && _mainWindow.WindowState == WindowState.Minimized)
+            {
+                MinimizeMainWindowToTray();
+            }
+
+            return;
+        }
+
+        if (change.Property == Window.WidthProperty || change.Property == Window.HeightProperty)
+        {
+            SaveWindowPlacement();
+        }
     }
 
     private void OnMainWindowClosing(object? sender, WindowClosingEventArgs e)
@@ -160,7 +266,9 @@ public partial class App : Application
         }
 
         _mainWindow.Show();
-        _mainWindow.WindowState = WindowState.Maximized;
+        _mainWindow.WindowState = _lastVisibleWindowState == WindowState.Minimized
+            ? WindowState.Normal
+            : _lastVisibleWindowState;
         _mainWindow.Activate();
 
         if (_trayIcon is not null)
@@ -172,6 +280,7 @@ public partial class App : Application
     private void ExitApplication()
     {
         _isExitRequested = true;
+        SaveWindowPlacement();
         _trayIcon?.Dispose();
 
         _mainWindow?.Close();
@@ -186,5 +295,73 @@ public partial class App : Application
     {
         using var stream = AssetLoader.Open(new Uri(AppIconAssetUri));
         return new WindowIcon(new Bitmap(stream));
+    }
+
+    private void ApplySavedWindowPlacement()
+    {
+        if (_mainWindow is null)
+        {
+            return;
+        }
+
+        AppSettingsStore.PersistedSettings settings = _settingsStore.Load();
+        AppSettingsStore.UiSettings ui = settings.Ui;
+
+        _isApplyingSavedWindowPlacement = true;
+        try
+        {
+            if (ui.WindowWidth.HasValue && ui.WindowWidth.Value >= 320)
+            {
+                _mainWindow.Width = ui.WindowWidth.Value;
+            }
+
+            if (ui.WindowHeight.HasValue && ui.WindowHeight.Value >= 240)
+            {
+                _mainWindow.Height = ui.WindowHeight.Value;
+            }
+
+            if (ui.WindowX.HasValue && ui.WindowY.HasValue)
+            {
+                _pendingWindowPosition = new PixelPoint((int)Math.Round(ui.WindowX.Value), (int)Math.Round(ui.WindowY.Value));
+            }
+
+            if (Enum.TryParse(ui.WindowState, ignoreCase: true, out WindowState savedState)
+                && savedState != WindowState.Minimized)
+            {
+                _pendingWindowState = savedState;
+                _lastVisibleWindowState = savedState;
+            }
+        }
+        finally
+        {
+            _isApplyingSavedWindowPlacement = false;
+        }
+    }
+
+    private void SaveWindowPlacement()
+    {
+        if (_mainWindow is null || _isApplyingSavedWindowPlacement)
+        {
+            return;
+        }
+
+        AppSettingsStore.PersistedSettings settings = _settingsStore.Load();
+        AppSettingsStore.UiSettings ui = settings.Ui;
+
+        WindowState stateToSave = _mainWindow.WindowState == WindowState.Minimized
+            ? _lastVisibleWindowState
+            : _mainWindow.WindowState;
+
+        ui.WindowState = stateToSave.ToString();
+
+        if (stateToSave == WindowState.Normal)
+        {
+            ui.WindowWidth = _mainWindow.Width;
+            ui.WindowHeight = _mainWindow.Height;
+            ui.WindowX = _mainWindow.Position.X;
+            ui.WindowY = _mainWindow.Position.Y;
+        }
+
+        _settingsStore.Save(settings);
     }
 }

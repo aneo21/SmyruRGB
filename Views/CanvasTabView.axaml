@@ -9,10 +9,15 @@
         </StackPanel>
 
         <Grid Grid.Row="1" ColumnDefinitions="2*,*" ColumnSpacing="16">
-            <Border Grid.Column="0" Classes="section-card">
-                <views:CanvasScenePreviewControl Scene="{Binding CanvasPreviewScene}"
-                                                 MoveDeviceCommand="{Binding MoveCanvasDeviceCommand}"
-                                                 MinHeight="520" />
+            <Border Grid.Column="0" Classes="section-card" Padding="10">
+                <views:CanvasScenePreviewControl
+                         Scene="{Binding CanvasPreviewScene}"
+                         MoveDeviceCommand="{Binding MoveCanvasDeviceCommand}"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Top"
+                         MaxWidth="1200"
+                         MaxHeight="600"
+                         MinHeight="520" />
             </Border>
 
             <Border Grid.Column="1" Classes="section-card">

@@ -23,13 +23,45 @@ internal sealed class ColorWipeEffect : ILedEffect
 
     public EffectFrame CreateFrame(EffectContext context)
     {
-        int totalLeds = context.LedCountsPerChannel.Sum();
+        List<(int ChannelIndex, int LedIndex)> orderedLeds = BuildOrderedLedList(context);
+        int totalLeds = orderedLeds.Count;
         int tailLength = Math.Min(Math.Max(1, context.GetParameterValue("tailLength", 12)), Math.Max(1, totalLeds));
         int cursor = totalLeds == 0 ? 0 : (int)(context.Tick % (totalLeds + tailLength));
 
-        return EffectFrameFactory.CreateMappedFrame(
-            context.LedCountsPerChannel,
-            (_, _, flatIndex) => flatIndex <= cursor && flatIndex > cursor - tailLength ? context.BaseColor : context.EffectiveBackgroundColor,
-            Math.Max(25, 125 - context.Speed));
+        IReadOnlyList<LedColor>[] channels = context.LedCountsPerChannel
+            .Select(count => Enumerable.Repeat(context.EffectiveBackgroundColor, count).ToArray() as IReadOnlyList<LedColor>)
+            .ToArray();
+
+        int start = Math.Max(0, cursor - tailLength + 1);
+        int end = Math.Min(cursor, totalLeds - 1);
+        for (int index = start; index <= end; index++)
+        {
+            (int channelIndex, int ledIndex) = orderedLeds[index];
+            LedColor[] channel = (LedColor[])channels[channelIndex];
+            channel[ledIndex] = context.BaseColor;
+        }
+
+        return new EffectFrame(channels, Math.Max(25, 125 - context.Speed));
+    }
+
+    private static List<(int ChannelIndex, int LedIndex)> BuildOrderedLedList(EffectContext context)
+    {
+        var ordered = new List<(int ChannelIndex, int LedIndex)>();
+
+        for (int channelIndex = 0; channelIndex < context.LedCountsPerChannel.Count; channelIndex++)
+        {
+            int ledCount = context.LedCountsPerChannel[channelIndex];
+            IEnumerable<(int ChannelIndex, int LedIndex, EffectLedLocation Location)> channelOrder =
+                Enumerable.Range(0, ledCount)
+                    .Select(ledIndex => (channelIndex, ledIndex, context.GetLedLocation(channelIndex, ledIndex)))
+                    .OrderBy(item => item.Item3.AxisPosition)
+                    .ThenBy(item => item.Item3.Y)
+                    .ThenBy(item => item.Item3.X)
+                    .ThenBy(item => item.ledIndex);
+
+            ordered.AddRange(channelOrder.Select(item => (item.ChannelIndex, item.LedIndex)));
+        }
+
+        return ordered;
     }
 }

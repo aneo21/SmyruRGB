@@ -1,5 +1,6 @@
 using HidSharp;
 using SmyruRGB.Effects;
+using System.Text.RegularExpressions;
 
 namespace SmyruRGB.Controllers.Hid.Roccat;
 
@@ -8,6 +9,7 @@ internal sealed class RoccatVulcanAimoKeyboardDriver : IHidRgbControllerDriver
     private const int RoccatVendorId = 0x1E7D;
     private const int RoccatVulcan120AimoProductId = 0x3098;
     private const string ControlInterfaceMarker = "mi_01";
+    private const string ControlCollectionMarker = "col05";
     private const string LedInterfaceMarker = "mi_03";
     private const int RoccatLayoutUs = 0;
     private const int ExpectedLedReportLength = 65;
@@ -76,12 +78,17 @@ internal sealed class RoccatVulcanAimoKeyboardDriver : IHidRgbControllerDriver
     {
         session = null;
 
-        if (!TryFindLedInterface(device, out HidDevice? ledDevice) || ledDevice is null)
+        if (!TryFindControlInterface(device, out HidDevice? controlDevice) || controlDevice is null)
         {
             return false;
         }
 
-        if (!device.TryOpen(out HidStream controlStream)
+        if (!TryFindLedInterface(controlDevice, out HidDevice? ledDevice) || ledDevice is null)
+        {
+            return false;
+        }
+
+        if (!controlDevice.TryOpen(out HidStream controlStream)
             || !ledDevice.TryOpen(out HidStream ledStream))
         {
             return false;
@@ -94,7 +101,7 @@ internal sealed class RoccatVulcanAimoKeyboardDriver : IHidRgbControllerDriver
 
         try
         {
-            session = new RoccatVulcanAimoKeyboardSession(device, controlStream, ledStream);
+            session = new RoccatVulcanAimoKeyboardSession(controlDevice, controlStream, ledStream);
             return true;
         }
         catch
@@ -105,15 +112,51 @@ internal sealed class RoccatVulcanAimoKeyboardDriver : IHidRgbControllerDriver
         }
     }
 
+    private static bool TryFindControlInterface(HidDevice seedDevice, out HidDevice? controlDevice)
+    {
+        string fingerprint = BuildDevicePathFingerprint(seedDevice.DevicePath);
+        List<HidDevice> candidates = DeviceList.Local.GetHidDevices(seedDevice.VendorID, seedDevice.ProductID)
+            .Where(candidate =>
+                candidate.DevicePath.Contains(ControlInterfaceMarker, StringComparison.OrdinalIgnoreCase)
+                && candidate.GetMaxFeatureReportLength() > 0
+                && string.Equals(BuildDevicePathFingerprint(candidate.DevicePath), fingerprint, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            controlDevice = null;
+            return false;
+        }
+
+        controlDevice = candidates.FirstOrDefault(candidate =>
+            candidate.DevicePath.Contains(ControlCollectionMarker, StringComparison.OrdinalIgnoreCase))
+            ?? candidates.FirstOrDefault(candidate => string.Equals(candidate.DevicePath, seedDevice.DevicePath, StringComparison.OrdinalIgnoreCase))
+            ?? candidates[0];
+
+        return true;
+    }
+
     private static bool TryFindLedInterface(HidDevice controlDevice, out HidDevice? ledDevice)
     {
-        ledDevice = DeviceList.Local.GetHidDevices(controlDevice.VendorID, controlDevice.ProductID)
-            .FirstOrDefault(candidate =>
+        string controlFingerprint = BuildDevicePathFingerprint(controlDevice.DevicePath);
+        IEnumerable<HidDevice> candidates = DeviceList.Local.GetHidDevices(controlDevice.VendorID, controlDevice.ProductID)
+            .Where(candidate =>
                 candidate.DevicePath.Contains(LedInterfaceMarker, StringComparison.OrdinalIgnoreCase)
                 && candidate.GetMaxOutputReportLength() >= ExpectedLedReportLength
                 && candidate.GetMaxInputReportLength() >= ExpectedLedReportLength);
 
+        ledDevice = candidates.FirstOrDefault(candidate =>
+            string.Equals(BuildDevicePathFingerprint(candidate.DevicePath), controlFingerprint, StringComparison.OrdinalIgnoreCase));
+
+        ledDevice ??= candidates.FirstOrDefault();
+
         return ledDevice is not null;
+    }
+
+    private static string BuildDevicePathFingerprint(string devicePath)
+    {
+        string withoutInterface = Regex.Replace(devicePath, "&mi_[0-9a-f]{2}", string.Empty, RegexOptions.IgnoreCase);
+        return Regex.Replace(withoutInterface, "&col[0-9a-f]{2}", string.Empty, RegexOptions.IgnoreCase);
     }
 
     private static string NormalizeInterfacePath(string devicePath)

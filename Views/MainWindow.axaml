@@ -2,10 +2,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:SmyruRGB.Views"
         x:Class="SmyruRGB.MainWindow"
-    WindowState="Maximized"
+    WindowStartupLocation="Manual"
         Title="SmyruRGB">
 
-    <Grid RowDefinitions="Auto,*" Margin="20">
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20">
         <Border Padding="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="14">
                 <Image Width="96"
@@ -40,5 +40,12 @@
                 <views:SettingsTabView />
             </TabItem>
         </TabControl>
+
+        <Border Grid.Row="2"
+                Padding="0,16,0,0"
+                HorizontalAlignment="Right">
+            <TextBlock Opacity="0.65"
+                       Text="{Binding AppVersion}" />
+        </Border>
     </Grid>
 </Window>

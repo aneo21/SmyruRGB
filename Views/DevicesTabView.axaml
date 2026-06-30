@@ -111,6 +111,7 @@
                                                             <Grid IsVisible="{Binding !IsCustomDevicePreset}" ColumnDefinitions="Auto,260,Auto" ColumnSpacing="12">
                                                                 <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding ChannelLabel}" />
                                                                 <ComboBox Grid.Column="1" Grid.ColumnSpan="6"
+                                                                          IsVisible="{Binding !IsRoccatDevice}"
                                                                           ItemsSource="{Binding AvailableDevicePresetOptions}"
                                                                           SelectedItem="{Binding SelectedDevicePresetOption}">
                                                                     <ComboBox.ItemTemplate>
@@ -119,6 +120,10 @@
                                                                         </DataTemplate>
                                                                     </ComboBox.ItemTemplate>
                                                                 </ComboBox>
+                                                                <TextBlock Grid.Column="1"
+                                                                           IsVisible="{Binding IsRoccatDevice}"
+                                                                           VerticalAlignment="Center"
+                                                                           Text="{Binding SelectedDevicePresetOption.DisplayName}" />
                                                             </Grid>
                                                         </StackPanel>
                                                     </Border>
